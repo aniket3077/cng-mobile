@@ -1,0 +1,1277 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Linking,
+  Dimensions,
+  Modal,
+  Image,
+} from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { colors, spacing, radius } from '../theme';
+import { suggestPumpsApi } from '../lib/api';
+import { StationSuggestion } from '../types';
+import { useAuth } from '../App';
+
+const { width, height } = Dimensions.get('window');
+
+interface Props {
+  navigation: any;
+}
+
+const FUEL_TYPES = ['CNG', 'LPG', 'Diesel', 'Petrol'];
+
+export default function CreateOrderScreen({ navigation }: Props) {
+  const { setIsAuthenticated } = useAuth();
+  const [destination, setDestination] = useState('');
+  const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [stationsAlongRoute, setStationsAlongRoute] = useState<StationSuggestion[]>([]);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const mapRef = useRef<MapView>(null);
+
+  useEffect(() => {
+    getCurrentLocation();
+  }, []);
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to find nearby stations.');
+        return;
+      }
+
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      setUserLocation({
+        lat: currentLocation.coords.latitude,
+        lng: currentLocation.coords.longitude,
+      });
+    } catch (error) {
+      console.error('Location error:', error);
+    }
+  };
+
+  const startNavigation = async () => {
+    if (!userLocation || !destination) {
+      Alert.alert('Error', 'Please set a destination');
+      return;
+    }
+
+    setIsNavigating(true);
+    
+    try {
+      // Fetch stations along route (for demo, using radius search)
+      const response = await suggestPumpsApi.suggest({
+        lat: userLocation.lat,
+        lng: userLocation.lng,
+        fuelType: 'CNG',
+        radiusKm: 50,
+      });
+
+      setStationsAlongRoute(response.suggestions || []);
+      
+      if (mapRef.current && userLocation && destinationCoords) {
+        mapRef.current.fitToCoordinates(
+          [
+            { latitude: userLocation.lat, longitude: userLocation.lng },
+            { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+          ],
+          {
+            edgePadding: { top: 100, right: 50, bottom: 400, left: 50 },
+            animated: true,
+          }
+        );
+      }
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to load navigation');
+    }
+  };
+
+  const selectDestinationOnMap = (lat: number, lng: number) => {
+    setDestinationCoords({ lat, lng });
+    setDestination(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Google Maps View */}
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        mapType={mapType}
+        style={styles.map}
+        initialRegion={{
+          latitude: userLocation?.lat || 20.5937,
+          longitude: userLocation?.lng || 78.9629,
+          latitudeDelta: 0.1,
+          longitudeDelta: 0.1,
+        }}
+        showsUserLocation={true}
+        showsMyLocationButton={false}
+        showsCompass={true}
+        showsTraffic={showTraffic}
+      >
+        {/* Station Markers */}
+        {stations.map((item, index) => (
+          <Marker
+            key={item.station.id}
+            coordinate={{
+              latitude: item.station.lat,
+              longitude: item.station.lng,
+            }}
+            title={item.station.name}
+            description={`${item.distance.toFixed(1)} km • ${item.station.fuelTypes}`}
+            pinColor={item.station.isPartner ? '#10B981' : '#3B82F6'}
+            onPress={() => onMarkerPress(item)}
+          />
+        ))}
+      </MapView>
+
+      {/* App Logo/Brand Header */}
+      <View style={styles.headerContainer}>
+        <View style={styles.logoContainer}>
+          <Image
+            source={require('../assets/Gemini_Generated_Image_9xexh79xexh79xex.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+          <View style={styles.brandTextContainer}>
+            <Text style={styles.brandName}>CNG Finder</Text>
+            <Text style={styles.brandTagline}>Find nearby stations</Text>
+          </View>
+        </View>
+        <TouchableOpacity style={styles.menuButton} onPress={() => setShowFilters(true)}>
+          <Text style={styles.menuIcon}>☰</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Search Bar Overlay */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search for CNG stations..."
+            placeholderTextColor="#9CA3AF"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+      </View>
+
+      {/* Zoom Controls */}
+      <View style={styles.zoomControls}>
+        <TouchableOpacity
+          style={styles.zoomButton}
+          onPress={() => {
+            if (mapRef.current) {
+              mapRef.current.getCamera().then((camera: any) => {
+                if (camera.zoom) {
+                  mapRef.current?.setCamera({ ...camera, zoom: camera.zoom + 1 });
+                }
+              });
+            }
+          }}
+        >
+          <Text style={styles.zoomIcon}>+</Text>
+        </TouchableOpacity>
+        <View style={styles.zoomDivider} />
+        <TouchableOpacity
+          style={styles.zoomButton}
+          onPress={() => {
+            if (mapRef.current) {
+              mapRef.current.getCamera().then((camera: any) => {
+                if (camera.zoom) {
+                  mapRef.current?.setCamera({ ...camera, zoom: camera.zoom - 1 });
+                }
+              });
+            }
+          }}
+        >
+          <Text style={styles.zoomIcon}>−</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* My Location Button */}
+      <TouchableOpacity
+        style={styles.myLocationButton}
+        onPress={() => {
+          if (userLocation && mapRef.current) {
+            mapRef.current.animateToRegion({
+              latitude: userLocation.lat,
+              longitude: userLocation.lng,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            }, 500);
+          }
+        }}
+      >
+        <Text style={styles.myLocationIcon}>📍</Text>
+      </TouchableOpacity>
+
+      {/* Map Layer Controls */}
+      <View style={styles.layerControls}>
+        <TouchableOpacity
+          style={styles.layerButton}
+          onPress={() => setShowMapLayers(!showMapLayers)}
+        >
+          <Text style={styles.layerButtonText}>Layers</Text>
+          <Text style={styles.layerButtonIcon}>▲</Text>
+        </TouchableOpacity>
+
+        {showMapLayers && (
+          <View style={styles.layerOptionsContainer}>
+            <View style={styles.layerOptionsGrid}>
+              <TouchableOpacity
+                style={[styles.layerOption, mapType === 'standard' && styles.layerOptionActive]}
+                onPress={() => {
+                  setMapType('standard');
+                  setShowMapLayers(false);
+                }}
+              >
+                <View style={[styles.layerPreview, { backgroundColor: '#E5E7EB' }]}>
+                  <Text style={styles.layerPreviewIcon}>🗺️</Text>
+                </View>
+                <Text style={styles.layerOptionText}>Default</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.layerOption, mapType === 'satellite' && styles.layerOptionActive]}
+                onPress={() => {
+                  setMapType('satellite');
+                  setShowMapLayers(false);
+                }}
+              >
+                <View style={[styles.layerPreview, { backgroundColor: '#1F2937' }]}>
+                  <Text style={styles.layerPreviewIcon}>🛰️</Text>
+                </View>
+                <Text style={styles.layerOptionText}>Satellite</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.layerOption, mapType === 'terrain' && styles.layerOptionActive]}
+                onPress={() => {
+                  setMapType('terrain');
+                  setShowMapLayers(false);
+                }}
+              >
+                <View style={[styles.layerPreview, { backgroundColor: '#D4C5A9' }]}>
+                  <Text style={styles.layerPreviewIcon}>🏔️</Text>
+                </View>
+                <Text style={styles.layerOptionText}>Terrain</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.layerDivider} />
+
+            <TouchableOpacity
+              style={styles.layerToggleOption}
+              onPress={() => setShowTraffic(!showTraffic)}
+            >
+              <View style={styles.layerToggleLeft}>
+                <Text style={styles.layerToggleIcon}>🚦</Text>
+                <Text style={styles.layerToggleText}>Traffic</Text>
+              </View>
+              <View style={[styles.toggleSwitch, showTraffic && styles.toggleSwitchActive]}>
+                <View style={[styles.toggleKnob, showTraffic && styles.toggleKnobActive]} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {/* Find Stations Button */}
+      <TouchableOpacity
+        style={[styles.findButton, loading && styles.buttonDisabled]}
+        onPress={findStations}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Text style={styles.findButtonText}>Find {fuelType} Stations</Text>
+        )}
+      </TouchableOpacity>
+
+      {/* Bottom Sheet for Selected Station */}
+      {selectedStation && (
+        <View style={styles.bottomSheet}>
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetHandle} />
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} style={styles.sheetScrollView}>
+            <View style={styles.sheetContent}>
+              {/* Station Header with Icon */}
+              <View style={styles.stationHeaderSection}>
+                <View style={styles.stationIconCircle}>
+                  <Text style={styles.stationIcon}>⛽</Text>
+                </View>
+                <View style={styles.stationHeaderText}>
+                  <View style={styles.stationTitleRow}>
+                    <Text style={styles.sheetTitle}>{selectedStation.station.name}</Text>
+                    {selectedStation.station.isPartner && (
+                      <View style={styles.partnerBadge}>
+                        <Text style={styles.partnerText}>★ Partner</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.sheetAddress}>
+                    📍 {selectedStation.station.address}, {selectedStation.station.city}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.sheetDetails}>
+                <View style={styles.sheetDetailItem}>
+                  <Text style={styles.sheetDetailIcon}>📏</Text>
+                  <Text style={styles.sheetDetailText}>
+                    {selectedStation.distance.toFixed(1)} km away
+                  </Text>
+                </View>
+                <View style={styles.sheetDetailItem}>
+                  <Text style={styles.sheetDetailIcon}>⭐</Text>
+                  <Text style={styles.sheetDetailText}>
+                    {selectedStation.station.rating.toFixed(1)} rating
+                  </Text>
+                </View>
+                <View style={styles.sheetDetailItem}>
+                  <Text style={styles.sheetDetailIcon}>⛽</Text>
+                  <Text style={styles.sheetDetailText}>
+                    {selectedStation.station.fuelTypes}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.navigateButtonLarge}
+                onPress={() => openNavigation(selectedStation.station)}
+              >
+                <Text style={styles.navigateButtonLargeText}>Start Navigation</Text>
+                <Text style={{ color: '#fff', fontSize: 20 }}>🧭</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Navigation Modal */}
+      <Modal
+        visible={showNavigationModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowNavigationModal(false)}
+      >
+        <View style={styles.navigationModal}>
+          {/* Header */}
+          <View style={styles.navigationHeader}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowNavigationModal(false)}
+            >
+              <Text style={styles.closeButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Travel Mode Selection */}
+          <View style={styles.travelModeContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <TouchableOpacity
+                style={[styles.travelModeButton, travelMode === 'driving' && styles.travelModeActive]}
+                onPress={() => setTravelMode('driving')}
+              >
+                <Text style={[styles.travelModeIcon, travelMode === 'driving' && styles.travelModeIconActive]}>🚗</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.travelModeButton, travelMode === 'motorcycle' && styles.travelModeActive]}
+                onPress={() => setTravelMode('motorcycle')}
+              >
+                <Text style={[styles.travelModeIcon, travelMode === 'motorcycle' && styles.travelModeIconActive]}>🏍️</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.travelModeButton, travelMode === 'transit' && styles.travelModeActive]}
+                onPress={() => setTravelMode('transit')}
+              >
+                <Text style={[styles.travelModeIcon, travelMode === 'transit' && styles.travelModeIconActive]}>🚌</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.travelModeButton, travelMode === 'walking' && styles.travelModeActive]}
+                onPress={() => setTravelMode('walking')}
+              >
+                <Text style={[styles.travelModeIcon, travelMode === 'walking' && styles.travelModeIconActive]}>🚶</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.travelModeButton, travelMode === 'bicycling' && styles.travelModeActive]}
+                onPress={() => setTravelMode('bicycling')}
+              >
+                <Text style={[styles.travelModeIcon, travelMode === 'bicycling' && styles.travelModeIconActive]}>🚴</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+
+          {/* Route Inputs */}
+          <View style={styles.routeInputsContainer}>
+            <View style={styles.routeIndicators}>
+              <View style={styles.startDot} />
+              <View style={styles.routeLine} />
+              <Text style={styles.destinationPin}>📍</Text>
+            </View>
+
+            <View style={styles.inputsColumn}>
+              {/* Start Point */}
+              <View style={styles.routeInputWrapper}>
+                <TextInput
+                  style={styles.routeInput}
+                  placeholder="Choose starting point, or click on th"
+                  value={startPoint}
+                  onChangeText={setStartPoint}
+                  placeholderTextColor={colors.textSecondary}
+                />
+                <TouchableOpacity style={styles.searchIconButton}>
+                  <Text style={styles.searchIconNav}>🔍</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Swap Button */}
+              <TouchableOpacity
+                style={styles.swapButton}
+                onPress={() => {
+                  const temp = startPoint;
+                  setStartPoint(destination);
+                  setDestination(temp);
+                }}
+              >
+                <Text style={styles.swapIcon}>⇅</Text>
+              </TouchableOpacity>
+
+              {/* Destination */}
+              <View style={styles.routeInputWrapper}>
+                <TextInput
+                  style={styles.routeInput}
+                  placeholder="Choose destination..."
+                  value={destination}
+                  onChangeText={setDestination}
+                  placeholderTextColor={colors.textSecondary}
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Quick Options */}
+          <View style={styles.quickOptionsContainer}>
+            <TouchableOpacity
+              style={styles.quickOption}
+              onPress={() => setStartPoint('Your location')}
+            >
+              <View style={styles.quickOptionIconCircle}>
+                <Text style={styles.quickOptionIcon}>📍</Text>
+              </View>
+              <Text style={styles.quickOptionText}>Your location</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.quickOption}>
+              <View style={styles.quickOptionIconCircle}>
+                <Text style={styles.quickOptionIcon}>🏠</Text>
+              </View>
+              <View style={styles.quickOptionTextContainer}>
+                <Text style={styles.quickOptionText}>Home</Text>
+                <Text style={styles.quickOptionSubtext}>Jatwada road, jela che, Jatwada Road, Ra...</Text>
+              </View>
+              <Text style={styles.editText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Traffic Info */}
+          <View style={styles.trafficInfoContainer}>
+            <Text style={styles.trafficTitle}>Delays</Text>
+            <Text style={styles.trafficText}>Light traffic in this area</Text>
+            <Text style={styles.trafficSubtext}>
+              No known road disruptions. Traffic incidents will show up here.
+            </Text>
+          </View>
+
+          {/* Start Navigation Button */}
+          <TouchableOpacity
+            style={styles.startNavigationButton}
+            onPress={startNavigation}
+          >
+            <Text style={styles.startNavigationText}>Start Navigation</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Filters Modal */}
+      <Modal
+        visible={showFilters}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFilters(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter Stations</Text>
+              <TouchableOpacity onPress={() => setShowFilters(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.filterLabel}>Fuel Type</Text>
+            <View style={styles.fuelTypes}>
+              {FUEL_TYPES.map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.fuelTypeButton,
+                    fuelType === type && styles.fuelTypeButtonActive,
+                  ]}
+                  onPress={() => setFuelType(type)}
+                >
+                  <Text
+                    style={[
+                      styles.fuelTypeText,
+                      fuelType === type && styles.fuelTypeTextActive,
+                    ]}
+                  >
+                    {type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={styles.applyButton}
+              onPress={() => {
+                setShowFilters(false);
+                findStations();
+              }}
+            >
+              <Text style={styles.applyButtonText}>Apply Filters</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.logoutButtonModal} onPress={handleLogout}>
+              <Text style={styles.logoutTextModal}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  map: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  headerContainer: {
+    position: 'absolute',
+    top: 40,
+    left: spacing.md,
+    right: spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 15,
+  },
+  logoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  logoImage: {
+    width: 40,
+    height: 40,
+    marginRight: spacing.sm,
+  },
+  brandTextContainer: {
+    justifyContent: 'center',
+  },
+  brandName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  brandTagline: {
+    fontSize: 11,
+    color: colors.muted,
+    fontWeight: '500',
+  },
+  menuButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  menuIcon: {
+    fontSize: 20,
+    color: colors.text,
+  },
+  searchContainer: {
+    position: 'absolute',
+    top: 110,
+    left: spacing.md,
+    right: spacing.md,
+    zIndex: 10,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchIcon: {
+    fontSize: 18,
+    marginRight: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+  },
+  filterIcon: {
+    fontSize: 18,
+    marginLeft: spacing.sm,
+  },
+  zoomControls: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: 320,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 10,
+    overflow: 'hidden',
+  },
+  zoomButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoomIcon: {
+    fontSize: 24,
+    fontWeight: '400',
+    color: colors.text,
+  },
+  zoomDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  myLocationButton: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: 250,
+    backgroundColor: colors.card,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 10,
+  },
+  myLocationIcon: {
+    fontSize: 24,
+  },
+  layerControls: {
+    position: 'absolute',
+    bottom: 30,
+    left: spacing.md,
+    zIndex: 10,
+  },
+  layerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  layerButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    marginRight: spacing.xs,
+  },
+  layerButtonIcon: {
+    fontSize: 12,
+    color: colors.text,
+  },
+  layerOptionsContainer: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  layerOptionsGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  layerOption: {
+    alignItems: 'center',
+    padding: spacing.xs,
+  },
+  layerOptionActive: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+  },
+  layerPreview: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  layerPreviewIcon: {
+    fontSize: 24,
+  },
+  layerOptionText: {
+    fontSize: 12,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  layerDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.sm,
+  },
+  layerToggleOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs,
+  },
+  layerToggleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  layerToggleIcon: {
+    fontSize: 20,
+    marginRight: spacing.sm,
+  },
+  layerToggleText: {
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  toggleSwitch: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.border,
+    padding: 2,
+  },
+  toggleSwitchActive: {
+    backgroundColor: colors.primary,
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  toggleKnobActive: {
+    transform: [{ translateX: 20 }],
+  },
+  findButton: {
+    position: 'absolute',
+    bottom: 200,
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 10,
+  },
+  findButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl + 8,
+    borderTopRightRadius: radius.xl + 8,
+    maxHeight: Dimensions.get('window').height * 0.55,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 12,
+    zIndex: 20,
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  sheetHandle: {
+    width: 36,
+    height: 5,
+    backgroundColor: colors.border,
+    borderRadius: 3,
+  },
+  sheetScrollView: {
+    flex: 1,
+  },
+  sheetContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  stationHeaderSection: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  stationIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  stationIcon: {
+    fontSize: 24,
+  },
+  stationHeaderText: {
+    flex: 1,
+  },
+  stationTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: spacing.xs,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginRight: spacing.sm,
+  },
+  partnerBadge: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.md,
+  },
+  partnerText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sheetAddress: {
+    fontSize: 13,
+    color: colors.muted,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  sheetDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: spacing.lg,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+  },
+  sheetDetailItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  sheetDetailIcon: {
+    fontSize: 24,
+    marginBottom: spacing.xs,
+  },
+  sheetDetailText: {
+    fontSize: 12,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  navigateButtonLarge: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md + 2,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: spacing.sm,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  navigateButtonLargeText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+    marginRight: spacing.xs,
+  },
+  navigationModal: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  navigationHeader: {
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    alignItems: 'flex-end',
+  },
+  closeButton: {
+    padding: spacing.sm,
+  },
+  closeButtonText: {
+    fontSize: 24,
+    color: colors.text,
+  },
+  travelModeContainer: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  travelModeButton: {
+    width: 70,
+    height: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+    borderRadius: 35,
+    backgroundColor: colors.surface,
+  },
+  travelModeActive: {
+    backgroundColor: '#E0F2FE',
+  },
+  travelModeIcon: {
+    fontSize: 32,
+  },
+  travelModeIconActive: {
+    fontSize: 32,
+  },
+  routeInputsContainer: {
+    flexDirection: 'row',
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  routeIndicators: {
+    width: 30,
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  startDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.primary,
+    marginTop: 20,
+  },
+  routeLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: colors.border,
+    marginVertical: 4,
+  },
+  destinationPin: {
+    fontSize: 20,
+    marginBottom: 10,
+  },
+  inputsColumn: {
+    flex: 1,
+  },
+  routeInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  routeInput: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    fontSize: 16,
+    color: colors.text,
+  },
+  searchIconButton: {
+    padding: spacing.xs,
+  },
+  searchIconNav: {
+    fontSize: 20,
+  },
+  swapButton: {
+    position: 'absolute',
+    right: -40,
+    top: 60,
+    width: 36,
+    height: 36,
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  swapIcon: {
+    fontSize: 20,
+    color: colors.text,
+  },
+  quickOptionsContainer: {
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  quickOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  quickOptionIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  quickOptionIcon: {
+    fontSize: 20,
+  },
+  quickOptionTextContainer: {
+    flex: 1,
+  },
+  quickOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  quickOptionSubtext: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  editText: {
+    fontSize: 15,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  trafficInfoContainer: {
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+  },
+  trafficTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  trafficText: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  trafficSubtext: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 20,
+  },
+  startNavigationButton: {
+    position: 'absolute',
+    bottom: spacing.lg,
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  startNavigationText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.card,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.lg,
+    maxHeight: Dimensions.get('window').height * 0.7,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  modalClose: {
+    fontSize: 24,
+    color: colors.muted,
+  },
+  filterLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  fuelTypes: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  fuelTypeButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  fuelTypeButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  fuelTypeText: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  fuelTypeTextActive: {
+    color: '#fff',
+  },
+  applyButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  applyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  logoutButtonModal: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  logoutTextModal: {
+    color: colors.danger,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});

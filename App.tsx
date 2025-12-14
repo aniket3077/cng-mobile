@@ -1,20 +1,110 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { authStorage } from './lib/auth';
+
+// Auth screens
+import SignupScreen from './screens/SignupScreen';
+import LoginScreen from './screens/LoginScreen';
+
+// Main app screens
+import CreateOrderScreen from './screens/CreateOrderScreen';
+import SuggestPumpsScreen from './screens/SuggestPumpsScreen';
+
+// Auth Context for global auth state management
+interface AuthContextType {
+  isAuthenticated: boolean;
+  setIsAuthenticated: (value: boolean) => void;
+  checkAuth: () => Promise<void>;
+}
+
+export const AuthContext = createContext<AuthContextType>({
+  isAuthenticated: false,
+  setIsAuthenticated: () => {},
+  checkAuth: async () => {},
+});
+
+export const useAuth = () => useContext(AuthContext);
+
+const AuthStack = createNativeStackNavigator();
+const MainStack = createNativeStackNavigator();
+const RootStack = createNativeStackNavigator();
+
+// Auth flow (Signup/Login)
+function AuthNavigator() {
+  return (
+    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="Signup" component={SignupScreen} />
+    </AuthStack.Navigator>
+  );
+}
+
+// Main app flow (after authentication)
+function MainNavigator() {
+  return (
+    <MainStack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: '#007AFF',
+        },
+        headerTintColor: '#fff',
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+      }}
+    >
+      <MainStack.Screen
+        name="CreateOrder"
+        component={CreateOrderScreen}
+        options={{ headerShown: false }}
+      />
+    </MainStack.Navigator>
+  );
+}
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    const authenticated = await authStorage.isAuthenticated();
+    setIsAuthenticated(authenticated);
+  };
+
+  // Loading state while checking auth
+  if (isAuthenticated === null) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <AuthContext.Provider value={{ isAuthenticated, setIsAuthenticated, checkAuth }}>
+      <NavigationContainer>
+        <RootStack.Navigator screenOptions={{ headerShown: false }}>
+          {isAuthenticated ? (
+            <RootStack.Screen name="Main" component={MainNavigator} />
+          ) : (
+            <RootStack.Screen name="Auth" component={AuthNavigator} />
+          )}
+        </RootStack.Navigator>
+      </NavigationContainer>
+    </AuthContext.Provider>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  loadingContainer: {
     flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
   },
 });
