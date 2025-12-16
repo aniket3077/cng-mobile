@@ -564,48 +564,6 @@ export default function CreateOrderScreen({ navigation }: Props) {
           );
         })}
         
-        {/* Debug: Show if no stations loaded */}
-        {!isNavigating && allStations.length === 0 && (
-          <>
-            <Marker
-              coordinate={{ latitude: 19.0596, longitude: 72.8295 }}
-              title="Test Station 1"
-              description="Bandra West\n🔋 CNG Available: 434 kg (Available)"
-            >
-              <View style={styles.gasStationMarker}>
-                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
-              </View>
-            </Marker>
-            <Marker
-              coordinate={{ latitude: 19.1136, longitude: 72.8697 }}
-              title="Test Station 2"
-              description="Andheri West\n🔋 CNG Available: 295 kg (Available)"
-            >
-              <View style={styles.gasStationMarker}>
-                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
-              </View>
-            </Marker>
-            <Marker
-              coordinate={{ latitude: 19.1868, longitude: 72.8479 }}
-              title="Test Station 3"
-              description="Malad\n🔋 CNG Available: 579 kg (Full)"
-            >
-              <View style={styles.gasStationMarker}>
-                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
-              </View>
-            </Marker>
-            <Marker
-              coordinate={{ latitude: 19.1663, longitude: 72.8526 }}
-              title="Test Station 4"
-              description="Goregaon West\n🔋 CNG Available: 122 kg (Low)"
-            >
-              <View style={styles.gasStationMarker}>
-                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
-              </View>
-            </Marker>
-          </>
-        )}
-
         {/* Station Markers - During navigation */}
         {isNavigating && stationsAlongRoute.map((item) => (
           <Marker
