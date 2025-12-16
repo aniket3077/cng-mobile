@@ -1,20 +1,20 @@
 {
   "expo": {
-    "name": "Fuel Bharat",
-    "slug": "fuel-bharat-mobile",
+    "name": "CNG Bharat",
+    "slug": "cng-bharat-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/Gemini_Generated_Image_9xexh79xexh79xex.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.fuelbharat.mobile",
+      "bundleIdentifier": "com.cngbharat.mobile",
       "config": {
         "googleMapsApiKey": "AIzaSyCuZ7Yw0Qe1gxJt9FUrHFCQvNBymm_XFn0"
       }
     },
     "android": {
-      "package": "com.fuelbharat.mobile",
+      "package": "com.cngbharat.mobile",
       "adaptiveIcon": {
         "foregroundImage": "./assets/Gemini_Generated_Image_9xexh79xexh79xex.png",
         "backgroundColor": "#FFFFFF"
@@ -33,7 +33,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow PetroLink to use your location to find nearby fuel stations."
+          "locationAlwaysAndWhenInUsePermission": "Allow CNG Bharat to use your location to find nearby CNG stations."
         }
       ]
     ]

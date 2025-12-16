@@ -13,6 +13,7 @@ import {
   Dimensions,
   Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius } from '../theme';
 import { authApi } from '../lib/api';
 import { authStorage } from '../lib/auth';
@@ -63,12 +64,19 @@ export default function SignupScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
+      console.log('📝 Attempting signup...');
+      console.log('🌐 API URL:', process.env.EXPO_PUBLIC_API_URL);
+      console.log('📧 Email:', email.trim().toLowerCase());
+      console.log('👤 Name:', name.trim());
+      
       const response = await authApi.signup({
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password,
         phone: phone.trim() || undefined,
       });
+
+      console.log('✅ Signup successful:', response.user.email);
 
       // Save token and user data
       await authStorage.saveToken(response.token);
@@ -77,6 +85,11 @@ export default function SignupScreen({ navigation }: Props) {
       // Update auth state to trigger navigation to main app
       setIsAuthenticated(true);
     } catch (error: any) {
+      console.error('❌ Signup error:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+      console.error('Error message:', error.message);
+      
       const message = error.response?.data?.error || 'Signup failed. Please try again.';
       Alert.alert('Error', message);
     } finally {
@@ -94,24 +107,23 @@ export default function SignupScreen({ navigation }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero Section */}
-        <View style={styles.heroSection}>
-          <View style={styles.iconContainer}>
+        {/* Header */}
+        <View style={styles.headerSection}>
+          <View style={styles.logoContainer}>
             <Image 
               source={require('../assets/Gemini_Generated_Image_9xexh79xexh79xex.png')}
               style={styles.logoImage}
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.appName}>Join Fuel Bharat</Text>
-          <Text style={styles.tagline}>Start finding fuel stations near you</Text>
+          <Text style={styles.appName}>CNG Bharat</Text>
         </View>
 
         {/* Signup Card */}
         <View style={styles.card}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Fill in your details to get started</Text>
+          <View style={styles.cardHeader}>
+            <Text style={styles.title}>Sign Up</Text>
+            <Text style={styles.subtitle}>Create your account</Text>
           </View>
 
           <View style={styles.form}>
@@ -122,7 +134,7 @@ export default function SignupScreen({ navigation }: Props) {
                 styles.inputWrapper,
                 nameFocused && styles.inputWrapperFocused
               ]}>
-                <Text style={styles.inputIcon}>👤</Text>
+                <Ionicons name="person-outline" size={20} color={nameFocused ? colors.primary : colors.muted} />
                 <TextInput
                   style={styles.input}
                   placeholder="John Doe"
@@ -139,12 +151,12 @@ export default function SignupScreen({ navigation }: Props) {
 
             {/* Email Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email Address</Text>
+              <Text style={styles.label}>Email</Text>
               <View style={[
                 styles.inputWrapper,
                 emailFocused && styles.inputWrapperFocused
               ]}>
-                <Text style={styles.inputIcon}>📧</Text>
+                <Ionicons name="mail-outline" size={20} color={emailFocused ? colors.primary : colors.muted} />
                 <TextInput
                   style={styles.input}
                   placeholder="you@example.com"
@@ -162,12 +174,12 @@ export default function SignupScreen({ navigation }: Props) {
 
             {/* Phone Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Phone Number (Optional)</Text>
+              <Text style={styles.label}>Phone (Optional)</Text>
               <View style={[
                 styles.inputWrapper,
                 phoneFocused && styles.inputWrapperFocused
               ]}>
-                <Text style={styles.inputIcon}>📱</Text>
+                <Ionicons name="call-outline" size={20} color={phoneFocused ? colors.primary : colors.muted} />
                 <TextInput
                   style={styles.input}
                   placeholder="+91 98765 43210"
@@ -189,10 +201,10 @@ export default function SignupScreen({ navigation }: Props) {
                 styles.inputWrapper,
                 passwordFocused && styles.inputWrapperFocused
               ]}>
-                <Text style={styles.inputIcon}>🔒</Text>
+                <Ionicons name="lock-closed-outline" size={20} color={passwordFocused ? colors.primary : colors.muted} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Create a password (min 6 chars)"
+                  placeholder="Min 6 characters"
                   placeholderTextColor={colors.muted}
                   value={password}
                   onChangeText={setPassword}
@@ -205,7 +217,11 @@ export default function SignupScreen({ navigation }: Props) {
                   onPress={() => setShowPassword(!showPassword)}
                   style={styles.eyeButton}
                 >
-                  <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                  <Ionicons 
+                    name={showPassword ? 'eye-outline' : 'eye-off-outline'} 
+                    size={20} 
+                    color={colors.muted} 
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -217,10 +233,10 @@ export default function SignupScreen({ navigation }: Props) {
                 styles.inputWrapper,
                 confirmPasswordFocused && styles.inputWrapperFocused
               ]}>
-                <Text style={styles.inputIcon}>🔒</Text>
+                <Ionicons name="lock-closed-outline" size={20} color={confirmPasswordFocused ? colors.primary : colors.muted} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Re-enter your password"
+                  placeholder="Re-enter password"
                   placeholderTextColor={colors.muted}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
@@ -233,7 +249,11 @@ export default function SignupScreen({ navigation }: Props) {
                   onPress={() => setShowConfirmPassword(!showConfirmPassword)}
                   style={styles.eyeButton}
                 >
-                  <Text style={styles.eyeIcon}>{showConfirmPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                  <Ionicons 
+                    name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} 
+                    size={20} 
+                    color={colors.muted} 
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -247,30 +267,18 @@ export default function SignupScreen({ navigation }: Props) {
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <>
-                  <Text style={styles.buttonText}>Create Account</Text>
-                  <Text style={styles.buttonArrow}>→</Text>
-                </>
+                <Text style={styles.buttonText}>Create Account</Text>
               )}
             </TouchableOpacity>
 
             {/* Login Link */}
-            <TouchableOpacity
-              style={styles.linkButton}
-              onPress={() => navigation.navigate('Login')}
-            >
-              <Text style={styles.linkText}>
-                Already have an account? <Text style={styles.linkTextBold}>Log In</Text>
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.linkContainer}>
+              <Text style={styles.linkText}>Already have an account? </Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                <Text style={styles.linkTextBold}>Sign In</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            By signing up, you agree to our Terms & Privacy Policy
-          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -280,141 +288,118 @@ export default function SignupScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: '#f5f5f5',
   },
   scrollContent: {
     flexGrow: 1,
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
   },
-  heroSection: {
+  headerSection: {
     alignItems: 'center',
-    marginBottom: spacing.xl,
     marginTop: spacing.lg,
+    marginBottom: spacing.xl,
   },
-  iconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+  logoContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    padding: spacing.sm,
-  },
-  logoImage: {
-    width: 80,
-    height: 80,
-  },
-  appName: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  tagline: {
-    fontSize: 15,
-    color: colors.muted,
-    fontWeight: '500',
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
-    padding: spacing.lg,
+    marginBottom: spacing.sm,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  header: {
+  logoImage: {
+    width: 48,
+    height: 48,
+  },
+  appName: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginHorizontal: spacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  cardHeader: {
     marginBottom: spacing.lg,
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.xs / 2,
   },
   subtitle: {
     fontSize: 14,
     color: colors.muted,
-    fontWeight: '500',
   },
-  form: {
-    gap: spacing.sm,
-  },
+  form: {},
   inputGroup: {
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   label: {
     fontSize: 13,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.xs / 2,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
+    backgroundColor: '#f8f8f8',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    height: 44,
   },
   inputWrapperFocused: {
     borderColor: colors.primary,
-    backgroundColor: colors.card,
-  },
-  inputIcon: {
-    fontSize: 20,
-    marginRight: spacing.sm,
+    backgroundColor: '#fff',
   },
   input: {
     flex: 1,
-    padding: spacing.sm,
+    paddingHorizontal: spacing.sm,
     fontSize: 15,
     color: colors.text,
   },
   eyeButton: {
-    padding: spacing.xs,
-  },
-  eyeIcon: {
-    fontSize: 20,
+    padding: spacing.xs / 2,
   },
   button: {
     backgroundColor: colors.primary,
-    borderRadius: radius.lg,
-    padding: spacing.md,
+    borderRadius: radius.md,
+    padding: spacing.sm + 2,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.sm,
-    flexDirection: 'row',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    marginTop: spacing.md,
+    height: 44,
   },
   buttonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
-  buttonArrow: {
-    color: '#fff',
-    fontSize: 20,
-    marginLeft: spacing.xs,
-  },
-  linkButton: {
+  linkContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: spacing.md,
   },
@@ -425,15 +410,6 @@ const styles = StyleSheet.create({
   linkTextBold: {
     color: colors.primary,
     fontWeight: '700',
-  },
-  footer: {
-    marginTop: spacing.xl,
-    alignItems: 'center',
-  },
-  footerText: {
-    color: colors.muted,
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
+    fontSize: 14,
   },
 });

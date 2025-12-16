@@ -27,11 +27,12 @@ export default function CreateOrderScreen({ navigation }: Props) {
   const [destination, setDestination] = useState('');
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [stationsAlongRoute, setStationsAlongRoute] = useState<StationSuggestion[]>([]);
+  const [allStations, setAllStations] = useState<StationSuggestion[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [currentInstruction, setCurrentInstruction] = useState('');
-  const [selectedFuelType, setSelectedFuelType] = useState<'CNG' | 'LPG' | 'Petrol'>('CNG');
+  const [selectedFuelType, setSelectedFuelType] = useState<'CNG'>('CNG');
   const [showRoutePlanModal, setShowRoutePlanModal] = useState(false);
   const [startingPoint, setStartingPoint] = useState('Your location');
   const [travelMode, setTravelMode] = useState<'driving' | 'motorcycle' | 'transit' | 'walking' | 'bicycling'>('driving');
@@ -53,6 +54,7 @@ export default function CreateOrderScreen({ navigation }: Props) {
 
   useEffect(() => {
     getCurrentLocation();
+    fetchAllStations();
     
     // Start animations
     Animated.parallel([
@@ -89,6 +91,56 @@ export default function CreateOrderScreen({ navigation }: Props) {
       setIsLoading(false);
     }, 2000);
   }, []);
+
+  const fetchAllStations = async () => {
+    try {
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+      console.log('🔍 Fetching stations from:', `${apiUrl}/api/stations`);
+      
+      const response = await fetch(`${apiUrl}/api/stations`);
+      console.log('📡 Response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📊 Total stations received:', data.stations?.length || 0);
+        
+        // Filter only approved CNG stations
+        const activeStations = data.stations
+          .filter((station: any) => {
+            const isApproved = station.approvalStatus === 'approved';
+            const hasCNG = station.fuelTypes?.includes('CNG');
+            console.log(`Station: ${station.name}, Approved: ${isApproved}, Has CNG: ${hasCNG}, Lat: ${station.lat}, Lng: ${station.lng}`);
+            return isApproved && hasCNG;
+          })
+          .map((station: any) => ({
+            station: {
+              id: station.id,
+              name: station.name,
+              address: station.address,
+              city: station.city,
+              state: station.state,
+              lat: parseFloat(station.lat),
+              lng: parseFloat(station.lng),
+              fuelTypes: station.fuelTypes,
+              phone: station.phone,
+              openingHours: station.openingHours,
+              cngAvailable: station.cngAvailable || 0,
+            },
+            distance: 0,
+            score: 0,
+            reason: 'Active CNG Station',
+          }));
+        
+        console.log(`✅ Loaded ${activeStations.length} CNG stations for map display`);
+        console.log('Stations:', activeStations.map(s => ({ name: s.station.name, lat: s.station.lat, lng: s.station.lng })));
+        setAllStations(activeStations);
+      } else {
+        console.error('❌ Failed to fetch stations:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching stations:', error);
+    }
+  };
 
   const getCurrentLocation = async () => {
     try {
@@ -457,10 +509,10 @@ export default function CreateOrderScreen({ navigation }: Props) {
         style={styles.map}
         mapType={mapType}
         initialRegion={{
-          latitude: userLocation?.lat || 20.5937,
-          longitude: userLocation?.lng || 78.9629,
-          latitudeDelta: 0.1,
-          longitudeDelta: 0.1,
+          latitude: userLocation?.lat || 19.1136,  // Mumbai - Andheri
+          longitude: userLocation?.lng || 72.8697,
+          latitudeDelta: 0.15,
+          longitudeDelta: 0.15,
         }}
         showsUserLocation={true}
         showsMyLocationButton={false}
@@ -486,11 +538,75 @@ export default function CreateOrderScreen({ navigation }: Props) {
               latitude: destinationCoords.lat,
               longitude: destinationCoords.lng,
             }}
-            pinColor="#EA4335"
+            pinColor="#35ea83ff"
           />
         )}
 
-        {/* Station Markers */}
+        {/* Station Markers - Show all approved stations */}
+        {!isNavigating && allStations.length > 0 && allStations.map((item) => {
+          console.log('🗺️ Rendering marker for:', item.station.name, 'at', item.station.lat, item.station.lng);
+          const cngAvailable = item.station.cngAvailable || 0;
+          const cngStatus = cngAvailable > 500 ? 'Full' : cngAvailable > 200 ? 'Available' : cngAvailable > 0 ? 'Low' : 'Empty';
+          return (
+            <Marker
+              key={item.station.id}
+              coordinate={{
+                latitude: item.station.lat,
+                longitude: item.station.lng,
+              }}
+              title={item.station.name}
+              description={`${item.station.address}\n🔋 CNG Available: ${cngAvailable} kg (${cngStatus})`}
+            >
+              <View style={styles.gasStationMarker}>
+                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
+              </View>
+            </Marker>
+          );
+        })}
+        
+        {/* Debug: Show if no stations loaded */}
+        {!isNavigating && allStations.length === 0 && (
+          <>
+            <Marker
+              coordinate={{ latitude: 19.0596, longitude: 72.8295 }}
+              title="Test Station 1"
+              description="Bandra West\n🔋 CNG Available: 434 kg (Available)"
+            >
+              <View style={styles.gasStationMarker}>
+                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
+              </View>
+            </Marker>
+            <Marker
+              coordinate={{ latitude: 19.1136, longitude: 72.8697 }}
+              title="Test Station 2"
+              description="Andheri West\n🔋 CNG Available: 295 kg (Available)"
+            >
+              <View style={styles.gasStationMarker}>
+                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
+              </View>
+            </Marker>
+            <Marker
+              coordinate={{ latitude: 19.1868, longitude: 72.8479 }}
+              title="Test Station 3"
+              description="Malad\n🔋 CNG Available: 579 kg (Full)"
+            >
+              <View style={styles.gasStationMarker}>
+                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
+              </View>
+            </Marker>
+            <Marker
+              coordinate={{ latitude: 19.1663, longitude: 72.8526 }}
+              title="Test Station 4"
+              description="Goregaon West\n🔋 CNG Available: 122 kg (Low)"
+            >
+              <View style={styles.gasStationMarker}>
+                <MaterialCommunityIcons name="gas-station" size={32} color="#FFFFFF" />
+              </View>
+            </Marker>
+          </>
+        )}
+
+        {/* Station Markers - During navigation */}
         {isNavigating && stationsAlongRoute.map((item) => (
           <Marker
             key={item.station.id}
@@ -516,33 +632,13 @@ export default function CreateOrderScreen({ navigation }: Props) {
             contentContainerStyle={styles.categoryScroll}
           >
             <TouchableOpacity
-              style={[styles.categoryPill, selectedFuelType === 'CNG' && styles.categoryPillActive]}
-              onPress={() => setSelectedFuelType('CNG')}
+              style={[styles.categoryPill, styles.categoryPillActive]}
+              activeOpacity={0.8}
             >
               <View style={styles.iconCircle}>
-                <Text style={[styles.categoryIconText, selectedFuelType === 'CNG' && styles.categoryIconActive]}>C</Text>
+                <Text style={[styles.categoryIconText, styles.categoryIconActive]}>C</Text>
               </View>
-              <Text style={[styles.categoryText, selectedFuelType === 'CNG' && styles.categoryTextActive]}>CNG</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.categoryPill, selectedFuelType === 'LPG' && styles.categoryPillActive]}
-              onPress={() => setSelectedFuelType('LPG')}
-            >
-              <View style={styles.iconCircle}>
-                <Text style={[styles.categoryIconText, selectedFuelType === 'LPG' && styles.categoryIconActive]}>L</Text>
-              </View>
-              <Text style={[styles.categoryText, selectedFuelType === 'LPG' && styles.categoryTextActive]}>LPG</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.categoryPill, selectedFuelType === 'Petrol' && styles.categoryPillActive]}
-              onPress={() => setSelectedFuelType('Petrol')}
-            >
-              <View style={styles.iconCircle}>
-                <Text style={[styles.categoryIconText, selectedFuelType === 'Petrol' && styles.categoryIconActive]}>P</Text>
-              </View>
-              <Text style={[styles.categoryText, selectedFuelType === 'Petrol' && styles.categoryTextActive]}>Petrol</Text>
+              <Text style={[styles.categoryText, styles.categoryTextActive]}>CNG</Text>
             </TouchableOpacity>
           </ScrollView>
         </Animated.View>
@@ -554,13 +650,7 @@ export default function CreateOrderScreen({ navigation }: Props) {
           {/* Profile Button */}
           <TouchableOpacity 
             style={styles.profileButton}
-            onPress={() => {
-              Alert.alert(
-                'Profile',
-                'Profile settings coming soon!',
-                [{ text: 'OK' }]
-              );
-            }}
+            onPress={() => navigation.navigate('Profile')}
           >
             <MaterialCommunityIcons name="account-circle" size={40} color="#5F6368" />
           </TouchableOpacity>
@@ -571,7 +661,7 @@ export default function CreateOrderScreen({ navigation }: Props) {
             activeOpacity={0.7}
           >
             <Text style={[styles.input, !destination && styles.placeholderText]}>
-              {destination || 'Search fule bharat Maps'}
+              {destination || 'Search CNG Bharat Maps'}
             </Text>
             <View style={styles.searchActions}>
               <TouchableOpacity style={styles.iconButton}>
@@ -1690,5 +1780,154 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#666',
     letterSpacing: 0.5,
+  },
+  // Custom Marker Styles - Google Maps Style Pin with Station Name
+  stationPinContainer: {
+    alignItems: 'center',
+    width: 140,
+  },
+  pinBody: {
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  pinCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 8,
+  },
+  pinTip: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#10B981',
+    marginTop: -2,
+  },
+  stationNameBubble: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#10B981',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 5,
+    maxWidth: 130,
+  },
+  stationNameText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#10B981',
+    textAlign: 'center',
+  },
+  pinMarkerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinPointer: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#10B981',
+    marginTop: -3,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  pinMarker: {
+    alignItems: 'center',
+  },
+  pinTriangle: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 10,
+    borderRightWidth: 10,
+    borderTopWidth: 15,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#10B981',
+    marginTop: -4,
+  },
+  customMarker: {
+    alignItems: 'center',
+  },
+  markerIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  markerLabelContainer: {
+    marginTop: 4,
+    backgroundColor: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#10B981',
+    maxWidth: 120,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  markerLabelText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#10B981',
+    textAlign: 'center',
+  },
+  gasStationMarker: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 8,
   },
 });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { authStorage } from './lib/auth';
 
 // Auth screens
@@ -11,6 +11,7 @@ import LoginScreen from './screens/LoginScreen';
 // Main app screens
 import CreateOrderScreen from './screens/CreateOrderScreen';
 import SuggestPumpsScreen from './screens/SuggestPumpsScreen';
+import ProfileScreen from './screens/ProfileScreen';
 
 // Auth Context for global auth state management
 interface AuthContextType {
@@ -60,6 +61,11 @@ function MainNavigator() {
         component={CreateOrderScreen}
         options={{ headerShown: false }}
       />
+      <MainStack.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ headerShown: false }}
+      />
     </MainStack.Navigator>
   );
 }
@@ -80,7 +86,14 @@ export default function App() {
   if (isAuthenticated === null) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <View style={styles.logoContainer}>
+          <Image 
+            source={require('./assets/logo.jpg')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+        </View>
+        <ActivityIndicator size="large" color="#0EA5E9" style={styles.loader} />
       </View>
     );
   }
@@ -105,6 +118,27 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  logoContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  logoImage: {
+    width: 80,
+    height: 80,
+  },
+  loader: {
+    marginTop: 8,
   },
 });
