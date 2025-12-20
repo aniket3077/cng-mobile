@@ -39,7 +39,10 @@ export const getDirections = async (
   try {
     const origin = `${start.lat},${start.lng}`;
     const destination = `${end.lat},${end.lng}`;
-    const apiKey = 'AIzaSyCuZ7Yw0Qe1gxJt9FUrHFCQvNBymm_XFn0';
+    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      throw new Error('EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not configured');
+    }
     
     const response = await fetch(
       `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=${mode}&key=${apiKey}`

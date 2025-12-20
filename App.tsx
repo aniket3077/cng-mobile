@@ -1,32 +1,20 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { authStorage } from './lib/auth';
+import { AuthContext } from './lib/authContext';
 
 // Auth screens
 import SignupScreen from './screens/SignupScreen';
 import LoginScreen from './screens/LoginScreen';
 
 // Main app screens
-import CreateOrderScreen from './screens/CreateOrderScreen';
+import MapHomeScreen from './screens/MapHomeScreen';
+import VoiceSearchScreen from './screens/VoiceSearchScreen';
+import NavigationScreen from './screens/NavigationScreen';
 import SuggestPumpsScreen from './screens/SuggestPumpsScreen';
 import ProfileScreen from './screens/ProfileScreen';
-
-// Auth Context for global auth state management
-interface AuthContextType {
-  isAuthenticated: boolean;
-  setIsAuthenticated: (value: boolean) => void;
-  checkAuth: () => Promise<void>;
-}
-
-export const AuthContext = createContext<AuthContextType>({
-  isAuthenticated: false,
-  setIsAuthenticated: () => {},
-  checkAuth: async () => {},
-});
-
-export const useAuth = () => useContext(AuthContext);
 
 const AuthStack = createNativeStackNavigator();
 const MainStack = createNativeStackNavigator();
@@ -57,8 +45,23 @@ function MainNavigator() {
       }}
     >
       <MainStack.Screen
-        name="CreateOrder"
-        component={CreateOrderScreen}
+        name="MapHome"
+        component={MapHomeScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="VoiceSearch"
+        component={VoiceSearchScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="Navigation"
+        component={NavigationScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="SuggestPumps"
+        component={SuggestPumpsScreen}
         options={{ headerShown: false }}
       />
       <MainStack.Screen
@@ -87,8 +90,8 @@ export default function App() {
     return (
       <View style={styles.loadingContainer}>
         <View style={styles.logoContainer}>
-          <Image 
-            source={require('./assets/logo.jpg')}
+          <Image
+            source={require('./assets/Gemini_Generated_Image_6b1drx6b1drx6b1d.png')}
             style={styles.logoImage}
             resizeMode="contain"
           />
