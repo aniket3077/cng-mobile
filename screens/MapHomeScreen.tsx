@@ -17,6 +17,7 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Region } from 'react-native
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { placesApi, routePlanningApi, stationsApi } from '../lib/api';
+import RoutePlanModal from '../components/RoutePlanModal';
 import { colors, spacing } from '../theme';
 import { decodePolyline } from '../utils/mapHelpers';
 import { LIGHT_MAP_STYLE } from '../utils/mapStyle';
@@ -186,30 +187,42 @@ export default function MapHomeScreen({ navigation }: Props) {
   };
 
   const onSelectStartingSuggestion = async (prediction: any) => {
-    setStartingPoint(prediction.description || prediction.mainText || '');
+    console.log('Selected starting suggestion:', prediction);
+    setStartingPoint(prediction.mainText || prediction.description || '');
     setShowStartingSuggestions(false);
     try {
+      console.log('Fetching place details for:', prediction.placeId);
       const details = await placesApi.getDetails(prediction.placeId);
+      console.log('Place details response:', details);
       const loc = details?.place?.location;
       if (loc?.lat != null && loc?.lng != null) {
+        console.log('Setting starting coords:', loc);
         setStartingCoords({ lat: loc.lat, lng: loc.lng });
+      } else {
+        console.log('No location found in response');
       }
     } catch (e) {
-      // ignore
+      console.error('Error getting place details:', e);
     }
   };
 
   const onSelectDestinationSuggestion = async (prediction: any) => {
-    setDestination(prediction.description || prediction.mainText || '');
+    console.log('Selected destination suggestion:', prediction);
+    setDestination(prediction.mainText || prediction.description || '');
     setShowDestinationSuggestions(false);
     try {
+      console.log('Fetching place details for:', prediction.placeId);
       const details = await placesApi.getDetails(prediction.placeId);
+      console.log('Place details response:', details);
       const loc = details?.place?.location;
       if (loc?.lat != null && loc?.lng != null) {
+        console.log('Setting destination coords:', loc);
         setDestinationCoords({ lat: loc.lat, lng: loc.lng });
+      } else {
+        console.log('No location found in response');
       }
     } catch (e) {
-      // ignore
+      console.error('Error getting place details:', e);
     }
   };
 
@@ -845,7 +858,7 @@ export default function MapHomeScreen({ navigation }: Props) {
         )
       }
 
-      {/* TODO: RoutePlanModal component needs to be created
+      {/* Route Plan Modal */}
       <RoutePlanModal
         visible={showRoutePlanModal}
         onClose={() => {
@@ -871,7 +884,6 @@ export default function MapHomeScreen({ navigation }: Props) {
         onStartNavigation={onStartRouteNavigation}
         destinationCoords={destinationCoords}
       />
-      */}
 
 
       {/* Navigation Panel - Shows when navigating - MUST BE LAST TO APPEAR ON TOP */}
