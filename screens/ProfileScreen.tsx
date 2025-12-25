@@ -227,6 +227,15 @@ export default function ProfileScreen({ navigation }: Props) {
 
         <View style={styles.menuCard}>
           <MenuItem
+            icon="card-outline"
+            title="Buy Subscription"
+            iconColor="#F59E0B"
+            onPress={() => navigation.navigate('Subscription')}
+          />
+        </View>
+
+        <View style={styles.menuCard}>
+          <MenuItem
             icon="download-outline"
             title="Offline Maps"
             iconColor="#10B981"

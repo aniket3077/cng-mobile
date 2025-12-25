@@ -173,7 +173,7 @@ export const placesApi = {
     const response = await api.post('/places/autocomplete', data);
     return response.data;
   },
-  
+
   getDetails: async (placeId: string) => {
     const response = await api.post('/places/details', { placeId });
     return response.data;
@@ -188,6 +188,24 @@ export const customerProfileApi = {
   },
   update: async (data: { name?: string; phone?: string | null }) => {
     const response = await api.put('/customer/profile', data);
+    return response.data;
+  },
+  subscribe: async (data: { planType: string }) => {
+    const response = await api.post('/customer/subscription', data);
+    return response.data;
+  },
+  createOrder: async (data: { planId: string; amount: number }) => {
+    const response = await api.post('/payments/create-order', data);
+    return response.data;
+  },
+
+  verifyPayment: async (data: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+    planType: string;
+  }) => {
+    const response = await api.post('/payments/verify', data);
     return response.data;
   },
 };

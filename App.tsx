@@ -15,6 +15,7 @@ import VoiceSearchScreen from './screens/VoiceSearchScreen';
 import NavigationScreen from './screens/NavigationScreen';
 import SuggestPumpsScreen from './screens/SuggestPumpsScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import SubscriptionScreen from './screens/SubscriptionScreen';
 
 const AuthStack = createNativeStackNavigator();
 const MainStack = createNativeStackNavigator();
@@ -67,6 +68,11 @@ function MainNavigator() {
       <MainStack.Screen
         name="Profile"
         component={ProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="Subscription"
+        component={SubscriptionScreen}
         options={{ headerShown: false }}
       />
     </MainStack.Navigator>
