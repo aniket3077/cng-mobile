@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { customerProfileApi } from '../lib/api';
 import { authStorage } from '../lib/auth';
+import { useAuth } from '../lib/authContext';
 // import RazorpayCheckout from 'react-native-razorpay'; // Uncomment for native build
 
 const { width } = Dimensions.get('window');
@@ -69,6 +70,11 @@ const PLAN_DATA = [
 
 export default function SubscriptionScreen() {
     const navigation = useNavigation();
+    const route = useRoute();
+    const { checkSubscription } = useAuth();
+    // @ts-ignore
+    const isMandatory = route.params?.isMandatory;
+
     const [selectedPlan, setSelectedPlan] = useState('6_month');
     const [loading, setLoading] = useState(false);
 
@@ -111,12 +117,33 @@ export default function SubscriptionScreen() {
             const selectedPlanData = PLAN_DATA.find(p => p.type === planId);
             if (!selectedPlanData) throw new Error("Plan not found");
 
-            // 1. Create Order
-            const numericPrice = parseInt(selectedPlanData.price.replace('₹', ''));
-            const orderData = await customerProfileApi.createOrder({
-                planId: planId,
-                amount: numericPrice
-            });
+            // 1. Create Order (Skip for Free Trial)
+            let orderData = null;
+            if (planId !== 'free_trial') {
+                const numericPrice = parseInt(selectedPlanData.price.replace('₹', ''));
+                orderData = await customerProfileApi.createOrder({
+                    planId: planId,
+                    amount: numericPrice
+                });
+            } else {
+                // For free trial, directly activate without payment
+                await customerProfileApi.subscribe({ planType: planId });
+
+                // Refresh user profile
+                const profile = await customerProfileApi.get();
+                if (profile?.user) {
+                    await authStorage.saveUser(profile.user);
+                }
+
+                Alert.alert('Success', 'Free trial activated successfully!');
+
+                if (isMandatory) {
+                    await checkSubscription(); // Refresh auth state to unlock App
+                } else {
+                    navigation.goBack();
+                }
+                return;
+            }
 
             // 2. Open Razorpay Checkout
             /*
@@ -185,7 +212,12 @@ export default function SubscriptionScreen() {
             }
 
             Alert.alert('Success', 'Subscription activated successfully!');
-            navigation.goBack();
+
+            if (isMandatory) {
+                await checkSubscription(); // Refresh auth state to unlock App
+            } else {
+                navigation.goBack();
+            }
         } catch (error) {
             console.error(error);
             Alert.alert('Error', 'Failed to activate subscription. Please try again.');
@@ -197,9 +229,11 @@ export default function SubscriptionScreen() {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#1E293B" />
-                </TouchableOpacity>
+                {!isMandatory && (
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                        <Ionicons name="arrow-back" size={24} color="#1E293B" />
+                    </TouchableOpacity>
+                )}
                 <Text style={styles.headerTitle}>Premium Plans</Text>
                 <View style={{ width: 40 }} />
             </View>

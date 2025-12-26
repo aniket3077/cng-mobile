@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { authStorage } from './lib/auth';
 import { AuthContext } from './lib/authContext';
+import { customerProfileApi } from './lib/api';
 
 // Auth screens
 import SignupScreen from './screens/SignupScreen';
@@ -81,14 +82,41 @@ function MainNavigator() {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [hasSubscription, setHasSubscription] = useState<boolean>(false);
 
   useEffect(() => {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      checkSubscription();
+    }
+  }, [isAuthenticated]);
+
+  const checkSubscription = async () => {
+    try {
+      const profile = await customerProfileApi.get();
+      if (profile?.user?.subscriptionType && profile?.user?.subscriptionEndsAt) {
+        const endDate = new Date(profile.user.subscriptionEndsAt);
+        if (endDate > new Date()) {
+          setHasSubscription(true);
+          return;
+        }
+      }
+      setHasSubscription(false);
+    } catch (error) {
+      console.log('Failed to check subscription:', error);
+      setHasSubscription(false);
+    }
+  };
+
   const checkAuth = async () => {
     const authenticated = await authStorage.isAuthenticated();
     setIsAuthenticated(authenticated);
+    if (authenticated) {
+      await checkSubscription();
+    }
   };
 
   // Loading state while checking auth
@@ -108,11 +136,21 @@ export default function App() {
   }
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, setIsAuthenticated, checkAuth }}>
+    <AuthContext.Provider value={{
+      isAuthenticated: !!isAuthenticated,
+      setIsAuthenticated,
+      checkAuth,
+      hasSubscription,
+      checkSubscription
+    }}>
       <NavigationContainer>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
           {isAuthenticated ? (
-            <RootStack.Screen name="Main" component={MainNavigator} />
+            hasSubscription ? (
+              <RootStack.Screen name="Main" component={MainNavigator} />
+            ) : (
+              <RootStack.Screen name="SubscriptionAuth" component={SubscriptionScreen} initialParams={{ isMandatory: true }} />
+            )
           ) : (
             <RootStack.Screen name="Auth" component={AuthNavigator} />
           )}

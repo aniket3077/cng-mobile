@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { placesApi, routePlanningApi, stationsApi } from '../lib/api';
+import { placesApi, routePlanningApi, stationsApi, customerProfileApi } from '../lib/api';
 import RoutePlanModal from '../components/RoutePlanModal';
 import { colors, spacing } from '../theme';
 import { decodePolyline } from '../utils/mapHelpers';
@@ -75,9 +75,54 @@ export default function MapHomeScreen({ navigation }: Props) {
   const mapRef = useRef<MapView>(null);
 
   useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      checkSubscriptionStatus();
+    });
+
+    checkSubscriptionStatus();
     requestLocationPermission();
     loadProfileImage();
-  }, []);
+
+    return unsubscribe;
+  }, [navigation]);
+
+  const [isSubscribed, setIsSubscribed] = useState(false);
+
+  const checkSubscriptionStatus = async () => {
+    try {
+      const res = await customerProfileApi.get();
+      if (res?.user?.subscriptionType && res?.user?.subscriptionEndsAt) {
+        const endDate = new Date(res.user.subscriptionEndsAt);
+        if (endDate > new Date()) {
+          setIsSubscribed(true);
+          return;
+        }
+      }
+      setIsSubscribed(false);
+    } catch (error) {
+      console.log('Failed to check subscription:', error);
+      // Default to false on error to be safe, or true if benevolent. Safe is false.
+      setIsSubscribed(false);
+    }
+  };
+
+  const checkFeatureAccess = () => {
+    if (!isSubscribed) {
+      Alert.alert(
+        'Subscription Required',
+        'You need an active subscription to use navigation features.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'View Plans',
+            onPress: () => navigation.navigate('Subscription')
+          }
+        ]
+      );
+      return false;
+    }
+    return true;
+  };
 
   const requestLocationPermission = async () => {
     try {
@@ -257,6 +302,8 @@ export default function MapHomeScreen({ navigation }: Props) {
   };
 
   const onStartRouteNavigation = () => {
+    if (!checkFeatureAccess()) return;
+
     if (!destinationCoords) {
       Alert.alert('Select destination', 'Please select a destination first.');
       return;
@@ -459,6 +506,8 @@ export default function MapHomeScreen({ navigation }: Props) {
   };
 
   const handleStartNavigation = async () => {
+    if (!checkFeatureAccess()) return;
+
     if (!selectedStation || !location) return;
 
     try {
@@ -745,7 +794,11 @@ export default function MapHomeScreen({ navigation }: Props) {
       {/* Voice Search Button */}
       <TouchableOpacity
         style={styles.voiceButton}
-        onPress={() => navigation.navigate('VoiceSearch')}
+        onPress={() => {
+          if (checkFeatureAccess()) {
+            navigation.navigate('VoiceSearch');
+          }
+        }}
       >
         <Ionicons name="mic" size={24} color="#fff" />
       </TouchableOpacity>
@@ -753,7 +806,11 @@ export default function MapHomeScreen({ navigation }: Props) {
       {/* Route Planner Button */}
       <TouchableOpacity
         style={styles.routePlanButton}
-        onPress={() => setShowRoutePlanModal(true)}
+        onPress={() => {
+          if (checkFeatureAccess()) {
+            setShowRoutePlanModal(true);
+          }
+        }}
       >
         <MaterialCommunityIcons name="routes" size={24} color="#fff" />
       </TouchableOpacity>
