@@ -6,11 +6,9 @@ import { authStorage } from './lib/auth';
 import { AuthContext } from './lib/authContext';
 import { customerProfileApi } from './lib/api';
 
-// Auth screens
 import SignupScreen from './screens/SignupScreen';
 import LoginScreen from './screens/LoginScreen';
 
-// Main app screens
 import MapHomeScreen from './screens/MapHomeScreen';
 import VoiceSearchScreen from './screens/VoiceSearchScreen';
 import NavigationScreen from './screens/NavigationScreen';
@@ -18,21 +16,22 @@ import SuggestPumpsScreen from './screens/SuggestPumpsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import SubscriptionScreen from './screens/SubscriptionScreen';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import OnboardingScreen from './screens/OnboardingScreen';
+
 const AuthStack = createNativeStackNavigator();
 const MainStack = createNativeStackNavigator();
 const RootStack = createNativeStackNavigator();
 
-// Auth flow (Signup/Login)
 function AuthNavigator() {
   return (
-    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+    <AuthStack.Navigator initialRouteName="Signup" screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Signup" component={SignupScreen} />
     </AuthStack.Navigator>
   );
 }
 
-// Main app flow (after authentication)
 function MainNavigator() {
   return (
     <MainStack.Navigator
@@ -83,16 +82,41 @@ function MainNavigator() {
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [hasSubscription, setHasSubscription] = useState<boolean>(false);
+  const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
 
   useEffect(() => {
+    checkFirstLaunch();
     checkAuth();
   }, []);
+
+  const checkFirstLaunch = async () => {
+    try {
+      const value = await AsyncStorage.getItem('hasLaunched');
+      if (value === null) {
+        setIsFirstLaunch(true);
+      } else {
+        setIsFirstLaunch(false);
+      }
+    } catch (error) {
+      console.log('Error checking launch status:', error);
+      setIsFirstLaunch(false); // Default to false if error to allow app usage
+    }
+  };
 
   useEffect(() => {
     if (isAuthenticated) {
       checkSubscription();
     }
   }, [isAuthenticated]);
+
+  const handleOnboardingComplete = async () => {
+    try {
+      await AsyncStorage.setItem('hasLaunched', 'true');
+      setIsFirstLaunch(false);
+    } catch (error) {
+      console.log('Error saving launch status:', error);
+    }
+  };
 
   const checkSubscription = async () => {
     try {
@@ -119,8 +143,7 @@ export default function App() {
     }
   };
 
-  // Loading state while checking auth
-  if (isAuthenticated === null) {
+  if (isAuthenticated === null || isFirstLaunch === null) {
     return (
       <View style={styles.loadingContainer}>
         <View style={styles.logoContainer}>
@@ -145,7 +168,11 @@ export default function App() {
     }}>
       <NavigationContainer>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
-          {isAuthenticated ? (
+          {isFirstLaunch ? (
+            <RootStack.Screen name="Onboarding">
+              {props => <OnboardingScreen {...props} onComplete={handleOnboardingComplete} />}
+            </RootStack.Screen>
+          ) : isAuthenticated ? (
             hasSubscription ? (
               <RootStack.Screen name="Main" component={MainNavigator} />
             ) : (

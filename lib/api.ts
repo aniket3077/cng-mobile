@@ -1,10 +1,8 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// API base URL - configure in .env
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://cng-backend.vercel.app';
 
-// Create axios instance
 const api = axios.create({
   baseURL: `${API_URL}/api`,
   headers: {
@@ -13,7 +11,6 @@ const api = axios.create({
   timeout: 10000,
 });
 
-// Request interceptor to add auth token
 api.interceptors.request.use(
   async (config) => {
     const token = await AsyncStorage.getItem('authToken');
@@ -27,12 +24,10 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid - clear storage
       await AsyncStorage.removeItem('authToken');
       await AsyncStorage.removeItem('user');
     }
@@ -40,7 +35,6 @@ api.interceptors.response.use(
   }
 );
 
-// Auth API
 export const authApi = {
   signup: async (data: {
     name: string;
@@ -68,7 +62,6 @@ export const authApi = {
   },
 };
 
-// Stations API
 export const stationsApi = {
   list: async (params?: {
     lat?: number;
@@ -83,7 +76,6 @@ export const stationsApi = {
   },
 };
 
-// Suggest pumps API
 export const suggestPumpsApi = {
   suggest: async (data: {
     plate?: string;
@@ -99,7 +91,6 @@ export const suggestPumpsApi = {
   },
 };
 
-// Navigation API
 export const navigationApi = {
   getRoute: async (data: {
     origin: { lat: number; lng: number };
@@ -111,7 +102,6 @@ export const navigationApi = {
   },
 };
 
-// Voice Query API
 export const voiceQueryApi = {
   processQuery: async (data: {
     query: string;
@@ -123,7 +113,6 @@ export const voiceQueryApi = {
   },
 };
 
-// Search stations API (Google Maps style)
 export const searchStationsApi = {
   search: async (data: {
     query: string;
@@ -138,7 +127,6 @@ export const searchStationsApi = {
   },
 };
 
-// Route planning API (travel from origin to destination)
 export const routePlanningApi = {
   planRoute: async (data: {
     origin: {
@@ -161,7 +149,6 @@ export const routePlanningApi = {
   },
 };
 
-// Places API (autocomplete and details)
 export const placesApi = {
   autocomplete: async (data: {
     input: string;
@@ -180,7 +167,6 @@ export const placesApi = {
   },
 };
 
-// Customer profile API
 export const customerProfileApi = {
   get: async () => {
     const response = await api.get('/customer/profile');

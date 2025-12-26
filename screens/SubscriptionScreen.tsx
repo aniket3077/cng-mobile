@@ -6,7 +6,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { customerProfileApi } from '../lib/api';
 import { authStorage } from '../lib/auth';
 import { useAuth } from '../lib/authContext';
-// import RazorpayCheckout from 'react-native-razorpay'; // Uncomment for native build
+import RazorpayCheckout from 'react-native-razorpay';
 
 const { width } = Dimensions.get('window');
 
@@ -78,6 +78,33 @@ export default function SubscriptionScreen() {
     const [selectedPlan, setSelectedPlan] = useState('6_month');
     const [loading, setLoading] = useState(false);
 
+    const completeSubscription = async () => {
+        setLoading(true);
+        try {
+            const profile = await customerProfileApi.get();
+            if (profile?.user) {
+                await authStorage.saveUser(profile.user);
+            }
+
+            Alert.alert('Success', 'Subscription activated successfully!');
+
+            // Always update global state so UI reflects premium status immediately
+            await checkSubscription();
+
+            if (isMandatory) {
+                // No need to do anything, App.tsx will re-render due to hasSubscription change? 
+                // Actually App.tsx logic: if hasSubscription becomes true, it renders Main. 
+                // So we might not even need navigation logic for mandatory, but keeping it safe.
+            } else {
+                navigation.goBack();
+            }
+        } catch (error) {
+            console.log("Profile refresh failed", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleSubscribe = async (planId: string) => {
         if (planId === 'free_trial') {
             Alert.alert(
@@ -146,78 +173,84 @@ export default function SubscriptionScreen() {
             }
 
             // 2. Open Razorpay Checkout
-            /*
-            // UNCOMMENT FOR REAL DEVICE TESTING WITH KEY
-            const options = {
-               description: `Subscription for ${selectedPlanData.name}`,
-               image: 'https://cdn-icons-png.flaticon.com/512/2554/2554936.png', // Placeholder logo
-               currency: 'INR',
-               key: orderData.keyId,
-               amount: orderData.amount,
-               name: 'CNG Bharat',
-               order_id: orderData.orderId,
-               prefill: {
-                   email: 'user@example.com', // Retrieve from authStorage if available
-                   contact: '9999999999',
-                   name: 'User Name'
-               },
-               theme: { color: selectedPlanData.color }
-           }
-           const data = await RazorpayCheckout.open(options);
-           
-           // On success:
-           await customerProfileApi.verifyPayment({
-               razorpay_order_id: data.razorpay_order_id,
-               razorpay_payment_id: data.razorpay_payment_id,
-               razorpay_signature: data.razorpay_signature,
-               planType: planId
-           });
-           */
+            if (planId !== 'free_trial' && orderData) {
+                const options = {
+                    description: `Subscription for ${selectedPlanData.name}`,
+                    image: 'https://cdn-icons-png.flaticon.com/512/2554/2554936.png',
+                    currency: 'INR',
+                    key: orderData.keyId,
+                    amount: orderData.amount, // Amount in paise
+                    name: 'CNG Bharat',
+                    order_id: orderData.orderId,
+                    prefill: {
+                        email: 'user@example.com',
+                        contact: '9999999999',
+                        name: 'Valued Customer'
+                    },
+                    theme: { color: selectedPlanData.color }
+                };
 
-            // --- SIMULATION START ---
-            // Simulating payment success for demo purposes. 
-            // In a real build, you would delete this simulation block and uncomment the block above.
+                try {
+                    const data = await RazorpayCheckout.open(options);
 
-            // For simulation, we will still CALL the verify endpoint to ensure backend logic is sound.
-            // Note: This will fail on the backend because signature verification will fail with fake data.
+                    // On success:
+                    await customerProfileApi.verifyPayment({
+                        razorpay_order_id: data.razorpay_order_id,
+                        razorpay_payment_id: data.razorpay_payment_id,
+                        razorpay_signature: data.razorpay_signature,
+                        planType: planId
+                    });
+                } catch (paymentError: any) {
+                    console.log("Payment Error:", paymentError);
 
-            // So for PURE DEMO without keys, we might need to fallback to 'subscribe' if verify fails,
-            // OR we just assume success if we are in 'demo mode'.
+                    // Check for Native Module missing or null error (common in Expo Go)
+                    if (paymentError && (paymentError.message === "Cannot read property 'open' of null" || paymentError.message?.includes("null"))) {
+                        Alert.alert(
+                            'Dev Environment Detected',
+                            'Razorpay Native Module is not available in Expo Go. Do you want to simulate a successful payment?',
+                            [
+                                { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) },
+                                {
+                                    text: 'Simulate Success',
+                                    onPress: async () => {
+                                        try {
+                                            // Simulate backend verification with fake data (Backend verification will likely fail signature check but we can bypass or handle that)
+                                            // Ideally, backend should have a 'bypass' for dev, but we will just fallback to direct subscribe if verify fails
+                                            try {
+                                                await customerProfileApi.verifyPayment({
+                                                    razorpay_order_id: orderData.orderId,
+                                                    razorpay_payment_id: "pay_simulated_" + Date.now(),
+                                                    razorpay_signature: "sim_sig",
+                                                    planType: planId
+                                                });
+                                            } catch (e) {
+                                                console.log("Verify failed as expected (fake sig), forcing subscribe...");
+                                                await customerProfileApi.subscribe({ planType: planId });
+                                            }
 
-            // Let's TRY to verify. If it fails (due to bad sig), we might show error.
-            // BUT since user wants "proper gateway integrated", the code above IS the proper integration.
-            // We will keep the simulation below for their current environment capability.
+                                            completeSubscription();
+                                        } catch (simError) {
+                                            Alert.alert('Simulation Error', 'Could not complete simulation.');
+                                            setLoading(false);
+                                        }
+                                    }
+                                }
+                            ]
+                        );
+                        return; // Exit here, let the alert handler finish the job
+                    }
 
-            const mockPaymentResponse = {
-                razorpay_order_id: orderData.orderId,
-                razorpay_payment_id: "pay_simulated_" + Date.now(),
-                razorpay_signature: "simulated_signature",
-                planType: planId
-            };
-
-            // NOTE: This verify call WILL fail on backend because signature is fake.
-            // To allow "continue" to work for the user, we will fallback to the direct subscribe for now
-            // effectively bypassing the verify check ONLY because we lack real payment credentials here.
-
-            // await customerProfileApi.verifyPayment(mockPaymentResponse); <--- This would be the real call
-
-            await customerProfileApi.subscribe({ planType: planId }); // <--- Fallback for demo
-
-            // --- SIMULATION END ---
-
-            // Refresh user profile
-            const profile = await customerProfileApi.get();
-            if (profile?.user) {
-                await authStorage.saveUser(profile.user);
+                    if (paymentError.code === 0 || paymentError.code === 'PAYMENT_CANCELLED') {
+                        Alert.alert('Payment Cancelled', 'You cancelled the payment process.');
+                    } else {
+                        Alert.alert('Payment Failed', paymentError.description || 'Something went wrong');
+                    }
+                    setLoading(false);
+                    return;
+                }
             }
 
-            Alert.alert('Success', 'Subscription activated successfully!');
-
-            if (isMandatory) {
-                await checkSubscription(); // Refresh auth state to unlock App
-            } else {
-                navigation.goBack();
-            }
+            completeSubscription();
         } catch (error) {
             console.error(error);
             Alert.alert('Error', 'Failed to activate subscription. Please try again.');
@@ -303,7 +336,7 @@ export default function SubscriptionScreen() {
                 </View>
 
             </ScrollView>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }
 
