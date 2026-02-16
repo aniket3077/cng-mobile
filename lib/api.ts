@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://cng-backend.vercel.app';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.cngbharat.com';
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
@@ -24,12 +24,15 @@ api.interceptors.request.use(
   }
 );
 
+import { emitLogout } from './events';
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
       await AsyncStorage.removeItem('authToken');
       await AsyncStorage.removeItem('user');
+      emitLogout();
     }
     return Promise.reject(error);
   }
@@ -176,7 +179,7 @@ export const customerProfileApi = {
     const response = await api.put('/customer/profile', data);
     return response.data;
   },
-  subscribe: async (data: { planType: string }) => {
+  subscribe: async (data: { planType: string; autoPay?: boolean }) => {
     const response = await api.post('/customer/subscription', data);
     return response.data;
   },

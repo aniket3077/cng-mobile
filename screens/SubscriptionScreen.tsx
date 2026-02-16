@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Dimensions, ActivityIndicator, Switch, Linking, NativeModules } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -15,7 +15,7 @@ const PLAN_DATA = [
         type: 'free_trial',
         name: 'Free Trial',
         price: '₹0',
-        duration: '/7 days',
+        duration: '/15 days',
         color: '#10B981',
         features: [
             'Ad-free experience',
@@ -27,8 +27,8 @@ const PLAN_DATA = [
     {
         type: '1_month',
         name: 'Monthly Plan',
-        price: '₹99',
-        duration: '/1 month',
+        price: '₹15',
+        duration: '/30 days',
         color: '#3B82F6',
         features: [
             'Ad-free experience',
@@ -40,30 +40,30 @@ const PLAN_DATA = [
     {
         type: '6_month',
         name: 'Half-Yearly Plan',
-        price: '₹499',
-        duration: '/6 months',
+        price: '₹79',
+        duration: '/180 days',
         color: '#8B5CF6',
         features: [
             'Includes all Monthly features',
             'Offline maps',
             'Real-time fuel prices',
             'Priority support',
-            'Save ₹100 vs Monthly'
+            'Best Value!'
         ],
         highlight: true
     },
     {
         type: '1_year',
         name: 'Annual Plan',
-        price: '₹899',
-        duration: '/1 year',
+        price: '₹150',
+        duration: '/365 days',
         color: '#F59E0B',
         features: [
             'All features included',
             'Business dashboard',
             'Fleet management',
             'Dedicated manager',
-            'Save ₹300 vs Monthly'
+            'Maximum Savings!'
         ]
     }
 ];
@@ -77,6 +77,7 @@ export default function SubscriptionScreen() {
 
     const [selectedPlan, setSelectedPlan] = useState('6_month');
     const [loading, setLoading] = useState(false);
+    const [autoPay, setAutoPay] = useState(true);
 
     const completeSubscription = async () => {
         setLoading(true);
@@ -109,7 +110,7 @@ export default function SubscriptionScreen() {
         if (planId === 'free_trial') {
             Alert.alert(
                 'Start Free Trial',
-                'Start your 7-day free trial now? No payment required.',
+                'Start your 15-day free trial now? No payment required.',
                 [
                     { text: 'Cancel', style: 'cancel' },
                     {
@@ -154,7 +155,10 @@ export default function SubscriptionScreen() {
                 });
             } else {
                 // For free trial, directly activate without payment
-                await customerProfileApi.subscribe({ planType: planId });
+                await customerProfileApi.subscribe({
+                    planType: planId,
+                    autoPay: autoPay  // Pass auto-pay preference for 1-month auto-renewal
+                });
 
                 // Refresh user profile
                 const profile = await customerProfileApi.get();
@@ -162,7 +166,10 @@ export default function SubscriptionScreen() {
                     await authStorage.saveUser(profile.user);
                 }
 
-                Alert.alert('Success', 'Free trial activated successfully!');
+                const autoPayMessage = autoPay
+                    ? 'Free trial activated! Auto-subscribe to Monthly Plan (₹15) is enabled.'
+                    : 'Free trial activated successfully!';
+                Alert.alert('Success', autoPayMessage);
 
                 if (isMandatory) {
                     await checkSubscription(); // Refresh auth state to unlock App
@@ -172,8 +179,51 @@ export default function SubscriptionScreen() {
                 return;
             }
 
+
+
+            // ... inside processSubscription ...
+
             // 2. Open Razorpay Checkout
             if (planId !== 'free_trial' && orderData) {
+
+                // Debug Check
+                const RZNative = NativeModules.RNRazorpayCheckout || NativeModules.RazorpayCheckout;
+                if (!RZNative) {
+                    Alert.alert(
+                        'Expo Go Detected',
+                        'Razorpay cannot run in Expo Go. Switching to Simulation Mode.',
+                        [
+                            {
+                                text: 'Simulate Payment',
+                                onPress: async () => {
+                                    // Simulation Logic
+                                    setLoading(true);
+                                    try {
+                                        try {
+                                            await customerProfileApi.verifyPayment({
+                                                razorpay_order_id: orderData.orderId,
+                                                razorpay_payment_id: "pay_simulated_" + Date.now(),
+                                                razorpay_signature: "sim_sig",
+                                                planType: planId
+                                            });
+                                        } catch (e) {
+                                            console.log("Verify failed (expected), forcing subscribe...");
+                                            await customerProfileApi.subscribe({ planType: planId });
+                                        }
+                                        completeSubscription();
+                                    } catch (simError) {
+                                        Alert.alert('Simulation Error', 'Failed.');
+                                    } finally {
+                                        setLoading(false);
+                                    }
+                                }
+                            },
+                            { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) }
+                        ]
+                    );
+                    return;
+                }
+
                 const options = {
                     description: `Subscription for ${selectedPlanData.name}`,
                     image: 'https://cdn-icons-png.flaticon.com/512/2554/2554936.png',
@@ -203,47 +253,10 @@ export default function SubscriptionScreen() {
                 } catch (paymentError: any) {
                     console.log("Payment Error:", paymentError);
 
-                    // Check for Native Module missing or null error (common in Expo Go)
-                    if (paymentError && (paymentError.message === "Cannot read property 'open' of null" || paymentError.message?.includes("null"))) {
-                        Alert.alert(
-                            'Dev Environment Detected',
-                            'Razorpay Native Module is not available in Expo Go. Do you want to simulate a successful payment?',
-                            [
-                                { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) },
-                                {
-                                    text: 'Simulate Success',
-                                    onPress: async () => {
-                                        try {
-                                            // Simulate backend verification with fake data (Backend verification will likely fail signature check but we can bypass or handle that)
-                                            // Ideally, backend should have a 'bypass' for dev, but we will just fallback to direct subscribe if verify fails
-                                            try {
-                                                await customerProfileApi.verifyPayment({
-                                                    razorpay_order_id: orderData.orderId,
-                                                    razorpay_payment_id: "pay_simulated_" + Date.now(),
-                                                    razorpay_signature: "sim_sig",
-                                                    planType: planId
-                                                });
-                                            } catch (e) {
-                                                console.log("Verify failed as expected (fake sig), forcing subscribe...");
-                                                await customerProfileApi.subscribe({ planType: planId });
-                                            }
-
-                                            completeSubscription();
-                                        } catch (simError) {
-                                            Alert.alert('Simulation Error', 'Could not complete simulation.');
-                                            setLoading(false);
-                                        }
-                                    }
-                                }
-                            ]
-                        );
-                        return; // Exit here, let the alert handler finish the job
-                    }
-
                     if (paymentError.code === 0 || paymentError.code === 'PAYMENT_CANCELLED') {
-                        Alert.alert('Payment Cancelled', 'You cancelled the payment process.');
+                        Alert.alert('Payment Cancelled', 'You cancelled the process.');
                     } else {
-                        Alert.alert('Payment Failed', paymentError.description || 'Something went wrong');
+                        Alert.alert('Payment Failed', paymentError.description || paymentError.message || 'Unknown error');
                     }
                     setLoading(false);
                     return;
@@ -320,6 +333,72 @@ export default function SubscriptionScreen() {
                     ))}
                 </View>
 
+                {/* Auto-Pay Option for Free Trial */}
+                {selectedPlan === 'free_trial' && (
+                    <View style={styles.autoPayContainer}>
+                        <View style={styles.autoPayLeft}>
+                            <View style={[styles.autoPayIconContainer, { backgroundColor: '#DBEAFE' }]}>
+                                <Ionicons name="card" size={20} color="#3B82F6" />
+                            </View>
+                            <View style={styles.autoPayTextContainer}>
+                                <Text style={styles.autoPayTitle}>Auto-Subscribe to Monthly</Text>
+                                <Text style={styles.autoPaySubtitle}>
+                                    Auto-subscribe to ₹15/month plan after trial ends
+                                </Text>
+                            </View>
+                        </View>
+                        <Switch
+                            value={autoPay}
+                            onValueChange={setAutoPay}
+                            trackColor={{ false: '#E2E8F0', true: '#93C5FD' }}
+                            thumbColor={autoPay ? '#3B82F6' : '#94A3B8'}
+                            ios_backgroundColor="#E2E8F0"
+                        />
+                    </View>
+                )}
+
+                {autoPay && selectedPlan === 'free_trial' && (
+                    <View style={[styles.autoPayInfoBox, { backgroundColor: '#EFF6FF' }]}>
+                        <Ionicons name="information-circle" size={18} color="#3B82F6" />
+                        <Text style={styles.autoPayInfoText}>
+                            After your 15-day free trial, you'll be automatically subscribed to the Monthly Plan (₹15/30 days). You can cancel anytime before trial ends.
+                        </Text>
+                    </View>
+                )}
+
+                {/* Auto-Pay Option for Paid Plans */}
+                {selectedPlan !== 'free_trial' && (
+                    <View style={styles.autoPayContainer}>
+                        <View style={styles.autoPayLeft}>
+                            <View style={styles.autoPayIconContainer}>
+                                <Ionicons name="repeat" size={20} color="#10B981" />
+                            </View>
+                            <View style={styles.autoPayTextContainer}>
+                                <Text style={styles.autoPayTitle}>Auto-Renewal</Text>
+                                <Text style={styles.autoPaySubtitle}>
+                                    Automatically renew when subscription expires
+                                </Text>
+                            </View>
+                        </View>
+                        <Switch
+                            value={autoPay}
+                            onValueChange={setAutoPay}
+                            trackColor={{ false: '#E2E8F0', true: '#86EFAC' }}
+                            thumbColor={autoPay ? '#10B981' : '#94A3B8'}
+                            ios_backgroundColor="#E2E8F0"
+                        />
+                    </View>
+                )}
+
+                {autoPay && selectedPlan !== 'free_trial' && (
+                    <View style={styles.autoPayInfoBox}>
+                        <Ionicons name="information-circle" size={18} color="#3B82F6" />
+                        <Text style={styles.autoPayInfoText}>
+                            You can cancel auto-renewal anytime from your profile settings. Your card will be charged automatically before expiry.
+                        </Text>
+                    </View>
+                )}
+
                 <View style={styles.actionContainer}>
                     <TouchableOpacity
                         style={[styles.subscribeButton, { backgroundColor: PLAN_DATA.find(p => p.type === selectedPlan)?.color || '#3B82F6' }]}
@@ -332,7 +411,13 @@ export default function SubscriptionScreen() {
                             <Text style={styles.subscribeText}>Get {PLAN_DATA.find(p => p.type === selectedPlan)?.name}</Text>
                         )}
                     </TouchableOpacity>
-                    <Text style={styles.termsText}>By subscribing, you agree to our Terms of Service</Text>
+
+                    <TouchableOpacity onPress={() => Linking.openURL('https://cngbharat.com/terms')}>
+                        <Text style={styles.termsText}>
+                            By subscribing, you agree to our{' '}
+                            <Text style={styles.termsLink}>Terms of Service</Text>
+                        </Text>
+                    </TouchableOpacity>
                 </View>
 
             </ScrollView>
@@ -491,6 +576,70 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontSize: 12,
         color: '#94A3B8',
-    }
-
+    },
+    termsLink: {
+        color: '#3B82F6',
+        fontWeight: '600',
+        textDecorationLine: 'underline',
+    },
+    autoPayContainer: {
+        backgroundColor: '#FFF',
+        borderRadius: 16,
+        padding: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    autoPayLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    autoPayIconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#ECFDF5',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    autoPayTextContainer: {
+        flex: 1,
+    },
+    autoPayTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#1E293B',
+        marginBottom: 2,
+    },
+    autoPaySubtitle: {
+        fontSize: 12,
+        color: '#64748B',
+    },
+    autoPayInfoBox: {
+        backgroundColor: '#EFF6FF',
+        borderRadius: 12,
+        padding: 12,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#BFDBFE',
+    },
+    autoPayInfoText: {
+        flex: 1,
+        fontSize: 12,
+        color: '#3B82F6',
+        lineHeight: 18,
+    },
 });

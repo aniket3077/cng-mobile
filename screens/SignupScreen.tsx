@@ -13,6 +13,7 @@ import {
   Dimensions,
   Image,
   Animated,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +39,7 @@ export default function SignupScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -86,6 +88,10 @@ export default function SignupScreen({ navigation }: Props) {
     }
     if (!password) {
       Alert.alert('Error', 'Please enter a password');
+      return;
+    }
+    if (!acceptedTerms) {
+      Alert.alert('Terms Required', 'Please accept the Terms and Conditions and Privacy Policy to continue');
       return;
     }
     if (password.length < 6) {
@@ -284,11 +290,40 @@ export default function SignupScreen({ navigation }: Props) {
                 </TouchableOpacity>
               </View>
 
+              {/* Terms and Conditions Checkbox */}
+              <TouchableOpacity
+                style={styles.termsContainer}
+                onPress={() => setAcceptedTerms(!acceptedTerms)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+                  {acceptedTerms && (
+                    <Ionicons name="checkmark" size={14} color="#fff" />
+                  )}
+                </View>
+                <Text style={styles.termsText}>
+                  I agree to the{' '}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => Linking.openURL('https://cngbharat.com/terms')}
+                  >
+                    Terms and Conditions
+                  </Text>
+                  {' '}and{' '}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => Linking.openURL('https://cngbharat.com/privacy')}
+                  >
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </TouchableOpacity>
+
               {/* Signup Button */}
               <TouchableOpacity
-                style={[styles.signupButton, loading && styles.signupButtonDisabled]}
+                style={[styles.signupButton, loading && styles.signupButtonDisabled, !acceptedTerms && styles.signupButtonDisabled]}
                 onPress={handleSignup}
-                disabled={loading}
+                disabled={loading || !acceptedTerms}
               >
                 <LinearGradient
                   colors={['#10B981', '#059669']}
@@ -467,5 +502,42 @@ const styles = StyleSheet.create({
     color: '#10B981',
     fontWeight: '700',
     fontSize: 14,
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#10B981',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#4B5563',
+    lineHeight: 20,
+  },
+  termsLink: {
+    color: '#10B981',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

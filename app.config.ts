@@ -4,7 +4,7 @@ import 'dotenv/config';
 const config: ExpoConfig = {
   name: 'CNG Bharat',
   slug: 'cng',
-  owner: 'aniket04',
+
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/Gemini_Generated_Image_6b1drx6b1drx6b1d.png',
@@ -38,11 +38,25 @@ const config: ExpoConfig = {
       },
     ],
     "expo-font",
+    [
+      "expo-build-properties",
+      {
+        "android": {
+          "compileSdkVersion": 35,
+          "targetSdkVersion": 35,
+          "buildToolsVersion": "35.0.0",
+          "kotlinVersion": "2.0.20"
+        },
+        "ios": {
+          "deploymentTarget": "15.1"
+        }
+      }
+    ]
   ],
   extra: {
-    apiUrl: 'https://cng-backend.vercel.app',
+    apiUrl: 'https://api.cngbharat.com',
     eas: {
-      projectId: 'c6511ef7-d1fc-41c5-9488-15973c944462'
+      projectId: '79d64e0b-bd39-4338-9ea5-bbcbe758783d'
     }
   },
 };

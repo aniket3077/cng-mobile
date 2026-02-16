@@ -51,15 +51,15 @@ export default function VoiceSearchScreen({ navigation }: Props) {
     try {
       // Note: expo-speech doesn't have voice recognition
       // For production, use @react-native-voice/voice or Google Speech API
-      
+
       setIsListening(true);
       speak('I am listening. Please tell me what you need.');
-      
+
       // Simulate voice recognition for demo
       setTimeout(() => {
         simulateVoiceInput();
       }, 3000);
-      
+
     } catch (error) {
       console.error('Voice recognition error:', error);
       Alert.alert('Error', 'Failed to start voice recognition');
@@ -73,9 +73,9 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       'Find nearby CNG pump',
       'Navigate to nearest CNG station',
       'Is CNG available nearby',
-      'Show me CNG stations in Delhi',
+      'Show me CNG stations in near my location',
     ];
-    
+
     const randomQuery = sampleQueries[Math.floor(Math.random() * sampleQueries.length)];
     setRecognizedText(randomQuery);
     setIsListening(false);
@@ -84,7 +84,7 @@ export default function VoiceSearchScreen({ navigation }: Props) {
 
   const processVoiceQuery = async (query: string) => {
     setProcessingQuery(true);
-    
+
     try {
       // Get current location (optional but improves results)
       let lat: number | undefined;
@@ -118,19 +118,22 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       // Speak backend-generated response (already limited to our approved CNG Bharat stations)
       speak(res.response || 'Here are CNG Bharat stations I found.');
 
-      // If user asked to navigate, start navigation to nearest station
-      if (res.intent === 'navigation' && res.nearestStation && currentLocation) {
+      // If user asked to navigate OR wants the nearest station, auto-navigate
+      // This fulfills user request: "when voice say nearest automatically navigate also"
+      if ((res.intent === 'navigation' || res.intent === 'show_nearest') && res.nearestStation) {
         const station = res.nearestStation;
-        navigation.navigate('Navigation', {
-          station: {
-            id: station.id,
-            name: station.name,
-            address: station.address,
-            city: station.city,
-            lat: station.lat,
-            lng: station.lng,
+        // Navigation should happen on the main map to follow user request
+        navigation.navigate('MapHome', {
+          targetStation: {
+            ...station,
+            // Ensure defaults for required fields if missing from voice response
+            fuelTypes: station.fuelTypes || 'CNG',
+            state: station.state || '',
+            isPartner: station.isPartner || false,
+            cngAvailable: station.cngAvailable,
+            cngQuantityKg: station.cngQuantityKg
           },
-          currentLocation,
+          autoNavigate: true
         });
         return;
       }
@@ -204,8 +207,8 @@ export default function VoiceSearchScreen({ navigation }: Props) {
           {isListening
             ? 'Listening...'
             : processingQuery
-            ? 'Processing...'
-            : 'Tap to speak'}
+              ? 'Processing...'
+              : 'Tap to speak'}
         </Text>
 
         {/* Recognized Text */}

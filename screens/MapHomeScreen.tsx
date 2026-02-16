@@ -40,9 +40,10 @@ interface Station {
 
 interface Props {
   navigation: any;
+  route?: any;
 }
 
-export default function MapHomeScreen({ navigation }: Props) {
+export default function MapHomeScreen({ navigation, route }: Props) {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [allStations, setAllStations] = useState<Station[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
@@ -50,6 +51,8 @@ export default function MapHomeScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [region, setRegion] = useState<Region | null>(null);
+  const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
+  const [isMapReady, setIsMapReady] = useState(false);
 
   const [showRoutePlanModal, setShowRoutePlanModal] = useState(false);
   const [travelMode, setTravelMode] = useState<'driving' | 'motorcycle' | 'transit' | 'walking' | 'bicycling'>('driving');
@@ -77,6 +80,33 @@ export default function MapHomeScreen({ navigation }: Props) {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       checkSubscriptionStatus();
+
+      // Handle incoming navigation requests (e.g. from Voice Search)
+      if (route?.params?.targetStation) {
+        const target = route.params.targetStation;
+        setSelectedStation(target);
+
+        // Center map
+        if (mapRef.current && isMapReady) {
+          mapRef.current.animateToRegion({
+            latitude: target.lat,
+            longitude: target.lng,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          });
+        }
+
+        // If auto-navigation requested
+        if (route.params.autoNavigate) {
+          // We need a slight delay to let state update or just call a modified function
+          // Since handleStartNavigation relies on state, we might need to pass params to it or use a separate effect.
+          // For now, let's just create a dedicated effect or helper.
+          initiateRouteToStation(target);
+        }
+
+        // Clear params to prevent re-running
+        navigation.setParams({ targetStation: null, autoNavigate: null });
+      }
     });
 
     checkSubscriptionStatus();
@@ -84,7 +114,73 @@ export default function MapHomeScreen({ navigation }: Props) {
     loadProfileImage();
 
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, route?.params]); // Trigger when params change
+
+  // Helper to start navigation to a specific station (bypassing selectedStation state reliance if needed)
+  const initiateRouteToStation = async (station: Station) => {
+    // Wait for location if not ready
+    if (!location) {
+      let loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc);
+      executeNavigation(loc, station);
+    } else {
+      executeNavigation(location, station);
+    }
+  };
+
+  const executeNavigation = async (originLoc: Location.LocationObject, targetStation: Station) => {
+    // Re-use logic from handleStartNavigation but with explicit params
+    if (!checkFeatureAccess()) return;
+
+    try {
+      setLoading(true);
+      const originCoords = {
+        lat: originLoc.coords.latitude,
+        lng: originLoc.coords.longitude,
+        address: 'Current Location',
+      };
+      const destCoords = {
+        lat: targetStation.lat,
+        lng: targetStation.lng,
+        address: targetStation.name,
+      };
+
+      const result = await routePlanningApi.planRoute({
+        origin: originCoords,
+        destination: destCoords,
+        travelMode: 'driving',
+        fuelType: 'CNG',
+      });
+
+      const polylineStr: string = result?.route?.polyline || '';
+      let decoded = polylineStr ? decodePolyline(polylineStr) : [
+        { latitude: originCoords.lat, longitude: originCoords.lng },
+        { latitude: destCoords.lat, longitude: destCoords.lng }
+      ];
+
+      setPlannedRouteCoords(decoded);
+      setPlannedDestination({
+        lat: targetStation.lat,
+        lng: targetStation.lng,
+        label: targetStation.name,
+      });
+
+      setNavigationStation(targetStation);
+      setIsNavigating(true);
+      setSelectedStation(null);
+
+      if (mapRef.current && decoded.length > 0 && isMapReady) {
+        mapRef.current.fitToCoordinates(decoded, {
+          edgePadding: { top: 120, right: 60, bottom: 200, left: 60 },
+          animated: true,
+        });
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to calculate route.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const [isSubscribed, setIsSubscribed] = useState(false);
 
@@ -362,7 +458,7 @@ export default function MapHomeScreen({ navigation }: Props) {
         });
         setStationHighlightRank(rankMap);
 
-        if (mapRef.current && decoded.length > 0) {
+        if (mapRef.current && decoded.length > 0 && isMapReady) {
           mapRef.current.fitToCoordinates(decoded, {
             edgePadding: { top: 120, right: 60, bottom: 340, left: 60 },
             animated: true,
@@ -461,7 +557,7 @@ export default function MapHomeScreen({ navigation }: Props) {
       setStations(filtered);
       // Center map on first result
       const station = filtered[0];
-      if (mapRef.current) {
+      if (mapRef.current && isMapReady) {
         mapRef.current.animateToRegion({
           latitude: station.lat,
           longitude: station.lng,
@@ -478,7 +574,7 @@ export default function MapHomeScreen({ navigation }: Props) {
     setSelectedStation(station);
 
     // Center map on selected station
-    if (mapRef.current) {
+    if (mapRef.current && isMapReady) {
       mapRef.current.animateToRegion({
         latitude: station.lat,
         longitude: station.lng,
@@ -489,7 +585,7 @@ export default function MapHomeScreen({ navigation }: Props) {
   };
 
   const handleMyLocation = () => {
-    if (location && mapRef.current) {
+    if (location && mapRef.current && isMapReady) {
       mapRef.current.animateToRegion({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -572,7 +668,7 @@ export default function MapHomeScreen({ navigation }: Props) {
       setSelectedStation(null); // Close bottom sheet
 
       // Fit map to show route
-      if (mapRef.current && decoded.length > 0) {
+      if (mapRef.current && decoded.length > 0 && isMapReady) {
         mapRef.current.fitToCoordinates(decoded, {
           edgePadding: { top: 120, right: 60, bottom: 200, left: 60 },
           animated: true,
@@ -676,14 +772,16 @@ export default function MapHomeScreen({ navigation }: Props) {
           style={styles.map}
           provider={PROVIDER_GOOGLE}
           initialRegion={region}
+          mapType={mapType}
           showsUserLocation
           showsMyLocationButton={false}
           showsCompass
           showsPointsOfInterest={false}
           showsBuildings={false}
-          customMapStyle={LIGHT_MAP_STYLE}
+          customMapStyle={mapType === 'standard' ? LIGHT_MAP_STYLE : undefined}
           loadingEnabled
           toolbarEnabled={false}
+          onMapReady={() => setIsMapReady(true)}
         >
           {plannedRouteCoords.length > 0 && (
             <Polyline coordinates={plannedRouteCoords} strokeColor={colors.primary} strokeWidth={5} />
@@ -782,6 +880,14 @@ export default function MapHomeScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Map Layer Button */}
+      <TouchableOpacity
+        style={styles.mapLayerButton}
+        onPress={() => setMapType(prev => prev === 'standard' ? 'satellite' : 'standard')}
+      >
+        <Ionicons name={mapType === 'standard' ? "layers" : "map"} size={24} color={colors.primary} />
+      </TouchableOpacity>
 
       {/* My Location Button */}
       <TouchableOpacity
@@ -1071,6 +1177,22 @@ const styles = StyleSheet.create({
     borderRadius: 23,
   },
   // ...
+  mapLayerButton: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: 300,
+    backgroundColor: '#fff',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
   myLocationButton: {
     position: 'absolute',
     right: spacing.md,

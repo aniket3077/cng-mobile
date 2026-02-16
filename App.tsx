@@ -18,6 +18,7 @@ import SubscriptionScreen from './screens/SubscriptionScreen';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from './screens/OnboardingScreen';
+import { onLogout } from './lib/events';
 
 const AuthStack = createNativeStackNavigator();
 const MainStack = createNativeStackNavigator();
@@ -87,6 +88,13 @@ export default function App() {
   useEffect(() => {
     checkFirstLaunch();
     checkAuth();
+
+    // Listen for global logout events (401)
+    const unsubscribe = onLogout(() => {
+      setIsAuthenticated(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const checkFirstLaunch = async () => {
