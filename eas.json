@@ -3,6 +3,7 @@
     "version": ">= 16.28.0",
     "appVersionSource": "remote"
   },
+  "owner": "Aniket Bankar",
   "build": {
     "development": {
       "developmentClient": true,

@@ -3,6 +3,8 @@
   "compilerOptions": {
     "strict": true,
     "types": ["expo-maps"],
-    "typeRoots": ["./types", "./node_modules/@types"]
+    "typeRoots": ["./types", "./node_modules/@types"],
+    "declaration": true,
+    "composite": false
   }
 }

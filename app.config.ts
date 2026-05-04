@@ -4,7 +4,7 @@ import 'dotenv/config';
 const config: ExpoConfig = {
   name: 'CNG Bharat',
   slug: 'cng',
-
+  owner: 'Aniket Bankar',
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/Gemini_Generated_Image_6b1drx6b1drx6b1d.png',
@@ -54,7 +54,7 @@ const config: ExpoConfig = {
     ]
   ],
   extra: {
-    apiUrl: 'https://api.cngbharat.com',
+    apiUrl: process.env.EXPO_PUBLIC_API_URL || 'https://cng-backend.vercel.app/api',
     eas: {
       projectId: '79d64e0b-bd39-4338-9ea5-bbcbe758783d'
     }

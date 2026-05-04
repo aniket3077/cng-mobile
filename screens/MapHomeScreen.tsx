@@ -36,6 +36,9 @@ interface Station {
   isPartner: boolean;
   cngAvailable?: boolean;
   cngQuantityKg?: number | null;
+  crowdLevel?: 'low' | 'medium' | 'high';
+  crowdCount?: number;
+  estimatedWaitTime?: number;
 }
 
 interface Props {
@@ -512,6 +515,18 @@ export default function MapHomeScreen({ navigation, route }: Props) {
     return { pin: colors.accent, scale: 1.06 };
   };
 
+  const getCrowdIndicator = (crowdLevel?: string) => {
+    switch (crowdLevel) {
+      case 'low':
+        return { color: '#10B981', icon: 'check-circle', label: 'Not Busy' };
+      case 'high':
+        return { color: '#EF4444', icon: 'alert-circle', label: 'Very Busy' };
+      case 'medium':
+      default:
+        return { color: '#F59E0B', icon: 'information', label: 'Moderate' };
+    }
+  };
+
   const fetchNearbyStations = async (lat: number, lng: number, radius: number = 10) => {
     try {
       setLoading(true);
@@ -804,28 +819,38 @@ export default function MapHomeScreen({ navigation, route }: Props) {
             </Marker>
           )}
 
-          {getDisplayedStations().map((station) => (
-            <Marker
-              key={station.id}
-              anchor={{ x: 0.5, y: 1 }}
-              coordinate={{
-                latitude: station.lat,
-                longitude: station.lng,
-              }}
-              title={station.name}
-              description={station.address}
-              onPress={() => handleMarkerPress(station)}
-            >
-              <View style={[styles.pinWrapper, { transform: [{ scale: getMarkerVisual(station.id).scale }] }]}>
-                <View style={[styles.pinHead, { backgroundColor: getMarkerVisual(station.id).pin }]}>
-                  <View style={styles.pinInner}>
-                    <MaterialCommunityIcons name="gas-station" size={18} color={getMarkerVisual(station.id).pin} />
+          {getDisplayedStations().map((station) => {
+            const crowdIndicator = getCrowdIndicator(station.crowdLevel);
+            return (
+              <Marker
+                key={station.id}
+                anchor={{ x: 0.5, y: 1 }}
+                coordinate={{
+                  latitude: station.lat,
+                  longitude: station.lng,
+                }}
+                title={station.name}
+                description={station.address}
+                onPress={() => handleMarkerPress(station)}
+              >
+                <View style={[styles.pinWrapper, { transform: [{ scale: getMarkerVisual(station.id).scale }] }]}>
+                  <View style={[styles.pinHead, { backgroundColor: getMarkerVisual(station.id).pin }]}>
+                    <View style={styles.pinInner}>
+                      <MaterialCommunityIcons name="gas-station" size={18} color={getMarkerVisual(station.id).pin} />
+                    </View>
                   </View>
+                  <View style={[styles.pinTail, { backgroundColor: getMarkerVisual(station.id).pin }]} />
+                  
+                  {/* Crowd Badge */}
+                  {station.crowdLevel && (
+                    <View style={[styles.crowdBadge, { backgroundColor: crowdIndicator.color }]}>
+                      <Ionicons name={crowdIndicator.icon as any} size={12} color="#fff" />
+                    </View>
+                  )}
                 </View>
-                <View style={[styles.pinTail, { backgroundColor: getMarkerVisual(station.id).pin }]} />
-              </View>
-            </Marker>
-          ))}
+              </Marker>
+            );
+          })}
         </MapView>
       )}
 
@@ -962,6 +987,36 @@ export default function MapHomeScreen({ navigation, route }: Props) {
               <View style={styles.detailRow}>
                 <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
                 <Text style={styles.detailText}>{selectedStation.openingHours}</Text>
+              </View>
+            )}
+
+            {/* Crowd Level Information */}
+            {selectedStation.crowdLevel && (
+              <View style={[styles.detailRow, styles.crowdDetailRow]}>
+                <Ionicons name="people-outline" size={16} color={colors.textSecondary} />
+                <View style={{ flex: 1 }}>
+                  <View style={styles.crowdLevelContainer}>
+                    <View
+                      style={[
+                        styles.crowdLevelIndicator,
+                        { backgroundColor: getCrowdIndicator(selectedStation.crowdLevel).color }
+                      ]}
+                    />
+                    <Text style={styles.detailText}>
+                      Crowd Level: {getCrowdIndicator(selectedStation.crowdLevel).label}
+                    </Text>
+                  </View>
+                  {selectedStation.crowdCount !== undefined && (
+                    <Text style={styles.crowdCountText}>
+                      {selectedStation.crowdCount} vehicles currently waiting
+                    </Text>
+                  )}
+                  {selectedStation.estimatedWaitTime !== undefined && (
+                    <Text style={styles.estimatedWaitText}>
+                      Est. Wait Time: ~{selectedStation.estimatedWaitTime} min
+                    </Text>
+                  )}
+                </View>
               </View>
             )}
 
@@ -1234,6 +1289,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 6,
     elevation: 10,
+    position: 'relative',
   },
   pinHead: {
     width: 38,
@@ -1497,5 +1553,53 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     borderTopColor: '#10B981',
     borderRightColor: '#10B981',
+  },
+  crowdBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 8,
+  },
+  crowdDetailRow: {
+    paddingVertical: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  crowdLevelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  crowdLevelIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  crowdCountText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginLeft: spacing.sm,
+    fontStyle: 'italic',
+  },
+  estimatedWaitText: {
+    fontSize: 12,
+    color: colors.primary,
+    marginLeft: spacing.sm,
+    fontWeight: '600',
+    marginTop: 4,
   },
 });

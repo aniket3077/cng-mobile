@@ -19,6 +19,9 @@ export interface Station {
   fuelTypes: string[];
   isPartner: boolean;
   rating: number;
+  crowdLevel?: 'low' | 'medium' | 'high';
+  crowdCount?: number;
+  estimatedWaitTime?: number;
 }
 
 export interface StationSuggestion {
