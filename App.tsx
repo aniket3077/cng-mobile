@@ -8,6 +8,9 @@ import { customerProfileApi } from './lib/api';
 
 import SignupScreen from './screens/SignupScreen';
 import LoginScreen from './screens/LoginScreen';
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
+import EnterOtpScreen from './screens/EnterOtpScreen';
+import ResetPasswordScreen from './screens/ResetPasswordScreen';
 
 import MapHomeScreen from './screens/MapHomeScreen';
 import VoiceSearchScreen from './screens/VoiceSearchScreen';
@@ -15,6 +18,9 @@ import NavigationScreen from './screens/NavigationScreen';
 import SuggestPumpsScreen from './screens/SuggestPumpsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import SubscriptionScreen from './screens/SubscriptionScreen';
+import ReferralScreen from './screens/ReferralScreen';
+import PayoutScreen from './screens/PayoutScreen';
+import PaymentScreen from './screens/PaymentScreen';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from './screens/OnboardingScreen';
@@ -29,6 +35,9 @@ function AuthNavigator() {
     <AuthStack.Navigator initialRouteName="Signup" screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Signup" component={SignupScreen} />
+      <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <AuthStack.Screen name="EnterOtp" component={EnterOtpScreen} />
+      <AuthStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
     </AuthStack.Navigator>
   );
 }
@@ -74,6 +83,21 @@ function MainNavigator() {
       <MainStack.Screen
         name="Subscription"
         component={SubscriptionScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="Referral"
+        component={ReferralScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="Payout"
+        component={PayoutScreen}
+        options={{ headerShown: false }}
+      />
+      <MainStack.Screen
+        name="Payment"
+        component={PaymentScreen}
         options={{ headerShown: false }}
       />
     </MainStack.Navigator>
@@ -189,6 +213,7 @@ export default function App() {
           ) : (
             <RootStack.Screen name="Auth" component={AuthNavigator} />
           )}
+          <RootStack.Screen name="Payment" component={PaymentScreen} />
         </RootStack.Navigator>
       </NavigationContainer>
     </AuthContext.Provider>

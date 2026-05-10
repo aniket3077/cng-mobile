@@ -236,6 +236,24 @@ export default function ProfileScreen({ navigation }: Props) {
 
         <View style={styles.menuCard}>
           <MenuItem
+            icon="people-outline"
+            title="Refer & Earn"
+            iconColor="#10B981"
+            onPress={() => navigation.navigate('Referral')}
+          />
+        </View>
+
+        <View style={styles.menuCard}>
+          <MenuItem
+            icon="wallet-outline"
+            title="Payouts"
+            iconColor="#6366F1"
+            onPress={() => navigation.navigate('Payout')}
+          />
+        </View>
+
+        <View style={styles.menuCard}>
+          <MenuItem
             icon="download-outline"
             title="Offline Maps"
             iconColor="#10B981"

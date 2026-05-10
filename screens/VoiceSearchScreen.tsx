@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import * as Location from 'expo-location';
 import { colors, spacing } from '../theme';
-import { voiceQueryApi } from '../lib/api';
+import { nearbyStationsApi, stationsApi, voiceQueryApi } from '../lib/api';
 
 interface Props {
   navigation: any;
@@ -111,7 +111,10 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       });
 
       if (!res?.success) {
-        speak('Sorry, I could not process your request right now.');
+        const handled = await handleLocalVoiceFallback(query, lat, lng, res?.error);
+        if (!handled) {
+          speak('Sorry, I could not process your request right now.');
+        }
         return;
       }
 
@@ -120,7 +123,7 @@ export default function VoiceSearchScreen({ navigation }: Props) {
 
       // If user asked to navigate OR wants the nearest station, auto-navigate
       // This fulfills user request: "when voice say nearest automatically navigate also"
-      if ((res.intent === 'navigation' || res.intent === 'show_nearest') && res.nearestStation) {
+      if ((res.intent === 'navigation' || res.intent === 'show_nearest' || res.intent === 'nearby_search') && res.nearestStation) {
         const station = res.nearestStation;
         // Navigation should happen on the main map to follow user request
         navigation.navigate('MapHome', {
@@ -144,9 +147,153 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       }, 1500);
     } catch (error) {
       console.error('Process query error:', error);
-      speak('Sorry, I encountered an error processing your request');
+      const handled = await handleLocalVoiceFallback(query, undefined, undefined);
+      if (!handled) {
+        speak('Sorry, I encountered an error processing your request');
+      }
     } finally {
       setProcessingQuery(false);
+    }
+  };
+
+  const getLocalIntent = (query: string) => {
+    const q = query.toLowerCase();
+    if (
+      q.includes('navigate') ||
+      q.includes('direction') ||
+      q.includes('nearest') ||
+      q.includes('closest') ||
+      q.includes('take me')
+    ) {
+      return 'navigation';
+    }
+    if (q.includes('nearby') || q.includes('near me') || q.includes('close')) {
+      return 'nearby_search';
+    }
+    if (q.includes('available') || q.includes('open')) {
+      return 'availability';
+    }
+    return 'general_search';
+  };
+
+  const handleLocalVoiceFallback = async (
+    query: string,
+    lat?: number,
+    lng?: number,
+    serverError?: string
+  ): Promise<boolean> => {
+    try {
+      let googleResponse: any = null;
+      if (lat != null && lng != null) {
+        try {
+          googleResponse = await nearbyStationsApi.list({ lat, lng, radius: 25000, limit: 5 });
+        } catch (googleError) {
+          const message = (googleError as any)?.response?.data?.error || (googleError as any)?.message || '';
+          const isNearbyBillingDenied =
+            (googleError as any)?.response?.status === 502 &&
+            typeof message === 'string' &&
+            (message.includes('REQUEST_DENIED') || message.includes('enable Billing'));
+
+          if (isNearbyBillingDenied) {
+            console.warn('Google nearby API unavailable for voice fallback. Using station fallback list.');
+          } else {
+            console.error('Google nearby stations fallback error:', googleError);
+          }
+          googleResponse = null;
+        }
+      }
+
+      const stations = Array.isArray(googleResponse?.stations)
+        ? googleResponse.stations.map((s: any) => ({
+            id: s.placeId || `${s.coordinates?.lat}-${s.coordinates?.lng}`,
+            name: s.name || 'CNG Station',
+            address: s.address || '',
+            city: '',
+            state: '',
+            lat: s.coordinates?.lat,
+            lng: s.coordinates?.lng,
+            fuelTypes: 'CNG',
+            isPartner: false,
+            cngAvailable: s.openNow ?? undefined,
+            cngQuantityKg: null,
+          }))
+        : [];
+
+      if (!stations.length) {
+        const response = await stationsApi.list({ lat, lng, fuelType: 'CNG' });
+        const fallbackStations = Array.isArray(response?.stations) ? response.stations : [];
+        if (!fallbackStations.length) {
+          if (serverError) {
+            speak('Voice service is restricted right now and no stations were found.');
+          }
+          return false;
+        }
+
+        const intent = getLocalIntent(query);
+        const nearest = fallbackStations[0];
+
+        if (intent === 'navigation' || intent === 'nearby_search') {
+          speak(`I found nearby stations. Starting navigation to ${nearest.name}.`);
+          navigation.navigate('MapHome', {
+            targetStation: {
+              ...nearest,
+              fuelTypes: nearest.fuelTypes || 'CNG',
+              state: nearest.state || '',
+              isPartner: nearest.isPartner || false,
+              cngAvailable: nearest.cngAvailable,
+              cngQuantityKg: nearest.cngQuantityKg,
+            },
+            autoNavigate: true,
+          });
+          return true;
+        }
+
+        if (intent === 'availability') {
+          speak(`${fallbackStations.length} CNG stations are available nearby.`);
+        } else {
+          speak(`Found ${fallbackStations.length} CNG stations near you.`);
+        }
+
+        setTimeout(() => {
+          navigation.navigate('MapHome');
+        }, 1200);
+
+        return true;
+      }
+
+      const intent = getLocalIntent(query);
+      const nearest = stations[0];
+
+      if (intent === 'navigation' || intent === 'nearby_search') {
+        speak(`I found nearby stations. Starting navigation to ${nearest.name}.`);
+        navigation.navigate('MapHome', {
+          targetStation: {
+            ...nearest,
+            fuelTypes: nearest.fuelTypes || 'CNG',
+            state: nearest.state || '',
+            isPartner: nearest.isPartner || false,
+            cngAvailable: nearest.cngAvailable,
+            cngQuantityKg: nearest.cngQuantityKg,
+          },
+          autoNavigate: true,
+        });
+        return true;
+      }
+
+      if (intent === 'availability') {
+        speak(`${stations.length} CNG stations are available nearby.`);
+      } else {
+        speak(`Found ${stations.length} CNG stations near you.`);
+      }
+
+      setTimeout(() => {
+        navigation.navigate('MapHome');
+      }, 1200);
+
+      return true;
+    } catch (fallbackError) {
+      console.error('Local voice fallback error:', fallbackError);
+      return false;
     }
   };
 

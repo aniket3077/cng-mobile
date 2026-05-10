@@ -75,7 +75,7 @@ export const useStations = () => {
     setError(null);
     
     try {
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://cng-backend.vercel.app';
       const endpoint = `${apiUrl}/api/stations`;
       
       console.log('🔍 Fetching stations from:', endpoint);

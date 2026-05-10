@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { placesApi, routePlanningApi, stationsApi, customerProfileApi } from '../lib/api';
+import { placesApi, routePlanningApi, stationsApi, nearbyStationsApi, customerProfileApi } from '../lib/api';
 import RoutePlanModal from '../components/RoutePlanModal';
 import { colors, spacing } from '../theme';
 import { decodePolyline } from '../utils/mapHelpers';
@@ -41,12 +41,28 @@ interface Station {
   estimatedWaitTime?: number;
 }
 
+const normalizeGoogleNearbyStations = (items: any[]): Station[] => {
+  return items.map((item: any) => ({
+    id: item.placeId || `${item.coordinates?.lat}-${item.coordinates?.lng}`,
+    name: item.name || 'CNG Station',
+    address: item.address || '',
+    city: '',
+    state: '',
+    lat: item.coordinates?.lat,
+    lng: item.coordinates?.lng,
+    fuelTypes: 'CNG',
+    isPartner: false,
+    cngAvailable: item.openNow ?? undefined,
+  })).filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number');
+};
+
 interface Props {
   navigation: any;
   route?: any;
 }
 
 export default function MapHomeScreen({ navigation, route }: Props) {
+  const SHOW_ONLY_GOOGLE = process.env.EXPO_PUBLIC_SHOW_ONLY_GOOGLE_CNG === 'true';
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [allStations, setAllStations] = useState<Station[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
@@ -153,13 +169,14 @@ export default function MapHomeScreen({ navigation, route }: Props) {
         destination: destCoords,
         travelMode: 'driving',
         fuelType: 'CNG',
+        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
       });
 
-      const polylineStr: string = result?.route?.polyline || '';
-      let decoded = polylineStr ? decodePolyline(polylineStr) : [
-        { latitude: originCoords.lat, longitude: originCoords.lng },
-        { latitude: destCoords.lat, longitude: destCoords.lng }
-      ];
+      const decoded = await getRouteCoordinatesFromApi(
+        originCoords,
+        destCoords,
+        result?.route?.polyline || ''
+      );
 
       setPlannedRouteCoords(decoded);
       setPlannedDestination({
@@ -438,6 +455,7 @@ export default function MapHomeScreen({ navigation, route }: Props) {
           destination: destCoords,
           travelMode,
           fuelType: 'CNG',
+          googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
         });
 
         const polylineStr: string = result?.route?.polyline || '';
@@ -518,31 +536,79 @@ export default function MapHomeScreen({ navigation, route }: Props) {
   const getCrowdIndicator = (crowdLevel?: string) => {
     switch (crowdLevel) {
       case 'low':
-        return { color: '#10B981', icon: 'check-circle', label: 'Not Busy' };
+        return { color: '#10B981', icon: 'checkmark-circle', label: 'Not Busy' };
       case 'high':
         return { color: '#EF4444', icon: 'alert-circle', label: 'Very Busy' };
       case 'medium':
       default:
-        return { color: '#F59E0B', icon: 'information', label: 'Moderate' };
+        return { color: '#F59E0B', icon: 'information-circle', label: 'Moderate' };
     }
   };
 
   const fetchNearbyStations = async (lat: number, lng: number, radius: number = 10) => {
     try {
       setLoading(true);
-      const response = await stationsApi.list({
+      const response = await nearbyStationsApi.list({
         lat,
         lng,
-        radius,
-        fuelType: 'CNG',
+        radius: Math.round(radius * 1000),
+        limit: 60,
+        googleOnly: SHOW_ONLY_GOOGLE,
       });
 
-      const nextStations: Station[] = response.stations || [];
+      const googleStations = normalizeGoogleNearbyStations(response?.stations || []);
+
+      if (googleStations.length === 0) {
+        if (SHOW_ONLY_GOOGLE) {
+          // User requested Google-only stations; show empty list if Google returns nothing
+          setAllStations([]);
+          setStations([]);
+          return;
+        }
+
+        const fallback = await stationsApi.list({
+          lat,
+          lng,
+          radius,
+          fuelType: 'CNG',
+        });
+        const nextStations: Station[] = fallback.stations || [];
+        setAllStations(nextStations);
+        setStations(nextStations);
+        return;
+      }
+
+      const nextStations: Station[] = googleStations;
       setAllStations(nextStations);
       setStations(nextStations);
     } catch (error: any) {
-      console.error('Fetch stations error:', error);
-      Alert.alert('Error', 'Failed to fetch nearby stations');
+      const message = error?.response?.data?.error || error?.message || '';
+      const isNearbyBillingDenied =
+        error?.response?.status === 502 &&
+        typeof message === 'string' &&
+        (message.includes('REQUEST_DENIED') || message.includes('enable Billing'));
+
+      if (isNearbyBillingDenied) {
+        console.warn('Google nearby API unavailable, switching to station fallback list.');
+      } else {
+        console.error('Fetch stations error:', error);
+      }
+
+      // Graceful fallback when Google Places is unavailable (e.g. billing not enabled)
+      try {
+        const fallback = await stationsApi.list({
+          lat,
+          lng,
+          radius,
+          fuelType: 'CNG',
+        });
+        const nextStations: Station[] = fallback.stations || [];
+        setAllStations(nextStations);
+        setStations(nextStations);
+      } catch (fallbackError) {
+        console.error('Fallback stations fetch error:', fallbackError);
+        Alert.alert('Error', 'Failed to fetch nearby stations');
+      }
     } finally {
       setLoading(false);
     }
@@ -642,34 +708,17 @@ export default function MapHomeScreen({ navigation, route }: Props) {
         destination: destCoords,
         travelMode: 'driving',
         fuelType: 'CNG',
+        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
       });
 
       console.log('Route planning result:', result);
       console.log('Polyline from result:', result?.route?.polyline);
 
-      // Decode polyline to get actual route coordinates
-      const polylineStr: string = result?.route?.polyline || '';
-      console.log('Polyline string:', polylineStr);
-
-      let decoded;
-      if (polylineStr) {
-        decoded = decodePolyline(polylineStr);
-        console.log('Decoded coordinates count:', decoded.length);
-        console.log('First coord:', decoded[0]);
-        console.log('Last coord:', decoded[decoded.length - 1]);
-      } else {
-        console.warn('No polyline received from API, using fallback');
-        decoded = [
-          {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          },
-          {
-            latitude: selectedStation.lat,
-            longitude: selectedStation.lng,
-          },
-        ];
-      }
+      const decoded = await getRouteCoordinatesFromApi(
+        originCoords,
+        destCoords,
+        result?.route?.polyline || ''
+      );
 
       setPlannedRouteCoords(decoded);
       setPlannedDestination({
@@ -724,6 +773,58 @@ export default function MapHomeScreen({ navigation, route }: Props) {
     setNavigationStation(null);
     setPlannedRouteCoords([]);
     setPlannedDestination(null);
+  };
+
+  const getRouteCoordinatesFromApi = async (
+    originCoords: { lat: number; lng: number },
+    destinationCoords: { lat: number; lng: number },
+    routePolyline: string
+  ) => {
+    if (routePolyline) {
+      const decoded = decodePolyline(routePolyline);
+      if (decoded.length >= 2) {
+        console.log('Decoded route from backend polyline:', decoded.length);
+        return decoded;
+      }
+    }
+
+    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.warn('No Google Maps API key found, using straight-line fallback');
+      return [
+        { latitude: originCoords.lat, longitude: originCoords.lng },
+        { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+      ];
+    }
+
+    try {
+      const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
+      url.searchParams.set('origin', `${originCoords.lat},${originCoords.lng}`);
+      url.searchParams.set('destination', `${destinationCoords.lat},${destinationCoords.lng}`);
+      url.searchParams.set('mode', 'driving');
+      url.searchParams.set('key', apiKey);
+
+      const response = await fetch(url.toString());
+      const data = await response.json();
+
+      const polyline = data?.routes?.[0]?.overview_polyline?.points || '';
+      if (polyline) {
+        const decoded = decodePolyline(polyline);
+        if (decoded.length >= 2) {
+          console.log('Decoded route from Google Directions directly:', decoded.length);
+          return decoded;
+        }
+      }
+
+      console.warn('Google Directions returned no route polyline, using straight line fallback');
+    } catch (error) {
+      console.error('Direct Google Directions fetch failed:', error);
+    }
+
+    return [
+      { latitude: originCoords.lat, longitude: originCoords.lng },
+      { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+    ];
   };
 
   // YouTube-style spinner animation

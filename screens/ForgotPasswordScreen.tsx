@@ -1,48 +1,44 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  Alert,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
-  ActivityIndicator,
-  Dimensions,
   Image,
-  ImageBackground,
+  Dimensions,
   Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, radius } from '../theme';
+import { spacing } from '../theme';
 import { authApi } from '../lib/api';
-import { authStorage } from '../lib/auth';
-import { useAuth } from '../lib/authContext';
-import { passwordResetStorage } from '../lib/passwordReset';
+import {
+  getResetIdentifierError,
+  normalizeResetIdentifier,
+  passwordResetStorage,
+} from '../lib/passwordReset';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 interface Props {
   navigation: any;
 }
 
-export default function LoginScreen({ navigation }: Props) {
-  const { setIsAuthenticated } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export default function ForgotPasswordScreen({ navigation }: Props) {
+  const [identifier, setIdentifier] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
 
-  // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   const logoScale = useRef(new Animated.Value(0.8)).current;
 
   useEffect(() => {
-    // Start animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -62,35 +58,52 @@ export default function LoginScreen({ navigation }: Props) {
         useNativeDriver: true,
       }),
     ]).start();
+  }, [fadeAnim, logoScale, slideAnim]);
+
+  useEffect(() => {
+    const loadExistingSession = async () => {
+      const existingSession = await passwordResetStorage.getSession();
+      if (existingSession?.identifier) {
+        setIdentifier(existingSession.identifier);
+      }
+    };
+
+    void loadExistingSession();
   }, []);
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+  const handleForgotPassword = async () => {
+    const validationError = getResetIdentifierError(identifier);
+    if (validationError) {
+      Alert.alert('Invalid Details', validationError);
       return;
     }
 
+    const normalizedIdentifier = normalizeResetIdentifier(identifier);
+
     setLoading(true);
     try {
-      const response = await authApi.login({ email, password });
+      const response = await authApi.forgotPassword({ identifier: normalizedIdentifier });
+      const now = Date.now();
 
-      if (response.success) {
-        await authStorage.saveToken(response.token);
-        await authStorage.saveUser(response.user);
-        setIsAuthenticated(true);
-        navigation.replace('Main');
-      } else {
-        Alert.alert('Error', response.message || 'Login failed');
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Error', 'Login failed. Please try again.');
+      await passwordResetStorage.saveSession({
+        deliveryChannel: response.deliveryChannel || 'email',
+        deliveryTarget: response.deliveryTarget || normalizedIdentifier,
+        identifier: normalizedIdentifier,
+        otpExpiresAt: now + (response.expiresIn || 600) * 1000,
+        resendAvailableAt: now + (response.resendAfter || 60) * 1000,
+      });
+
+      navigation.navigate('EnterOtp', {
+        identifier: normalizedIdentifier,
+      });
+    } catch (error: any) {
+      const message = error.response?.data?.error || 'Failed to send OTP. Please try again.';
+      Alert.alert('Unable to Send OTP', message);
     } finally {
       setLoading(false);
     }
   };
 
-  
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -102,8 +115,8 @@ export default function LoginScreen({ navigation }: Props) {
             styles.logoContainer,
             {
               opacity: fadeAnim,
-              transform: [{ scale: logoScale }]
-            }
+              transform: [{ scale: logoScale }],
+            },
           ]}
         >
           <View style={styles.logoCircle}>
@@ -114,7 +127,7 @@ export default function LoginScreen({ navigation }: Props) {
             />
           </View>
           <Text style={styles.appName}>CNG Bharat</Text>
-          <Text style={styles.tagline}>Find nearby CNG stations instantly</Text>
+          <Text style={styles.tagline}>Recover access to your account</Text>
         </Animated.View>
       </LinearGradient>
 
@@ -133,97 +146,69 @@ export default function LoginScreen({ navigation }: Props) {
                 styles.card,
                 {
                   opacity: fadeAnim,
-                  transform: [{ translateY: slideAnim }]
-                }
+                  transform: [{ translateY: slideAnim }],
+                },
               ]}
             >
-              <Text style={styles.title}>Welcome Back</Text>
-              <Text style={styles.subtitle}>Sign in to continue</Text>
+              <Text style={styles.title}>Forgot Password?</Text>
+              <Text style={styles.subtitle}>
+                Enter your registered email or mobile number. For security, we will send the OTP
+                to the email linked to your account.
+              </Text>
 
-              {/* Email Input */}
               <View style={styles.inputContainer}>
                 <View style={styles.inputIconContainer}>
-                  <Ionicons name="mail-outline" size={20} color="#10B981" />
+                  <Ionicons name="person-circle-outline" size={20} color="#10B981" />
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="Email Address"
+                  placeholder="Email or Mobile Number"
                   placeholderTextColor="#9CA3AF"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
+                  value={identifier}
+                  onChangeText={setIdentifier}
                   autoCapitalize="none"
-                  autoComplete="email"
+                  autoCorrect={false}
+                  textContentType="username"
                 />
               </View>
 
-              {/* Password Input */}
-              <View style={styles.inputContainer}>
-                <View style={styles.inputIconContainer}>
-                  <Ionicons name="lock-closed-outline" size={20} color="#10B981" />
-                </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password"
-                  placeholderTextColor="#9CA3AF"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  autoComplete="password"
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeButton}
-                >
-                  <Ionicons
-                    name={showPassword ? 'eye-outline' : 'eye-off-outline'}
-                    size={20}
-                    color="#9CA3AF"
-                  />
-                </TouchableOpacity>
+              <View style={styles.infoCard}>
+                <Ionicons name="information-circle-outline" size={18} color="#059669" />
+                <Text style={styles.infoText}>
+                  Using your mobile number still sends the OTP to your registered email, matching
+                  the current secure reset flow.
+                </Text>
               </View>
 
-              {/* Login Button */}
               <TouchableOpacity
-                style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-                onPress={handleLogin}
+                style={[styles.resetButton, loading && styles.resetButtonDisabled]}
+                onPress={handleForgotPassword}
                 disabled={loading}
               >
                 <LinearGradient
                   colors={['#10B981', '#059669']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
-                  style={styles.loginGradient}
+                  style={styles.resetGradient}
                 >
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
                     <>
-                      <Text style={styles.loginButtonText}>Sign In</Text>
+                      <Text style={styles.resetButtonText}>Send OTP</Text>
                       <Ionicons name="arrow-forward" size={20} color="#fff" />
                     </>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
 
-              {/* Sign Up Link */}
-              <View style={styles.signupContainer}>
-                <Text style={styles.signupText}>Don't have an account? </Text>
-                <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-                  <Text style={styles.signupLink}>Sign Up</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Forgot Password Link */}
-              <View style={styles.forgotPasswordContainer}>
+              <View style={styles.backToLoginContainer}>
+                <Text style={styles.backToLoginText}>Remember your password? </Text>
                 <TouchableOpacity
-                  onPress={() => {
-                    void passwordResetStorage.clearSession();
-                    navigation.navigate('ForgotPassword');
-                  }}
+                  onPress={() => navigation.navigate('Login')}
                   disabled={loading}
                 >
-                  <Text style={styles.forgotPasswordLink}>Forgot Password?</Text>
+                  <Text style={styles.backToLoginLink}>Back to Login</Text>
                 </TouchableOpacity>
               </View>
             </Animated.View>
@@ -308,12 +293,13 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     color: '#1F2937',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 15,
     color: '#6B7280',
     marginBottom: spacing.xl,
+    lineHeight: 22,
     fontWeight: '500',
   },
   inputContainer: {
@@ -336,57 +322,62 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     fontWeight: '500',
   },
-  eyeButton: {
-    padding: spacing.xs,
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#F0FDF4',
+    borderRadius: 16,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    gap: 10,
+    marginBottom: spacing.xl,
   },
-  loginButton: {
+  infoText: {
+    flex: 1,
+    color: '#047857',
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  resetButton: {
     borderRadius: 16,
     overflow: 'hidden',
-    marginTop: spacing.md,
     shadowColor: '#10B981',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
-  loginButtonDisabled: {
+  resetButtonDisabled: {
     opacity: 0.6,
   },
-  loginGradient: {
+  resetGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
     gap: 8,
   },
-  loginButtonText: {
+  resetButtonText: {
     color: '#fff',
     fontSize: 17,
     fontWeight: '700',
   },
-  signupContainer: {
+  backToLoginContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: spacing.lg,
+    marginTop: spacing.xl,
   },
-  signupText: {
+  backToLoginText: {
     fontSize: 16,
     color: '#64748b',
     marginRight: spacing.sm,
   },
-  signupLink: {
+  backToLoginLink: {
     fontSize: 16,
     fontWeight: '600',
     color: '#10B981',
-  },
-  forgotPasswordContainer: {
-    alignItems: 'center',
-    marginTop: spacing.md,
-  },
-  forgotPasswordLink: {
-    fontSize: 14,
-    color: '#10B981',
-    textDecorationLine: 'underline',
   },
 });

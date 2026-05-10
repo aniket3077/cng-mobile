@@ -36,6 +36,7 @@ export default function SignupScreen({ navigation }: Props) {
   const [vehicleNo, setVehicleNo] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -111,6 +112,7 @@ export default function SignupScreen({ navigation }: Props) {
         phone: phone.trim(),
         vehicleNo: vehicleNo.trim().toUpperCase(),
         password,
+        referralCode: referralCode.trim().toUpperCase(),
       });
 
       await authStorage.saveToken(response.token);
@@ -236,6 +238,30 @@ export default function SignupScreen({ navigation }: Props) {
                   autoCapitalize="characters"
                   autoCorrect={false}
                 />
+              </View>
+
+              {/* Referral Code Input */}
+              <View style={styles.inputContainer}>
+                <View style={styles.inputIconContainer}>
+                  <Ionicons name="gift-outline" size={20} color="#10B981" />
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Referral Code (Optional)"
+                  placeholderTextColor="#9CA3AF"
+                  value={referralCode}
+                  onChangeText={setReferralCode}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={8}
+                />
+              </View>
+              
+              {/* Referral Info */}
+              <View style={styles.referralInfo}>
+                <Text style={styles.referralInfoText}>
+                  💰 Have a referral code? Enter it to get special benefits!
+                </Text>
               </View>
 
               {/* Password Input */}
@@ -498,7 +524,7 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 14,
   },
-  loginLink: {
+  logintermsLink: {
     color: '#10B981',
     fontWeight: '700',
     fontSize: 14,
@@ -539,5 +565,24 @@ const styles = StyleSheet.create({
     color: '#10B981',
     fontWeight: '700',
     textDecorationLine: 'underline',
+  },
+  loginLink: {
+    color: '#10B981',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  referralInfo: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+  },
+  referralInfoText: {
+    color: '#92400E',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '500',
   },
 });

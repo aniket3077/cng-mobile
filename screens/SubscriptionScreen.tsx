@@ -69,7 +69,7 @@ const PLAN_DATA = [
 ];
 
 export default function SubscriptionScreen() {
-    const navigation = useNavigation();
+    const navigation = useNavigation<any>();
     const route = useRoute();
     const { checkSubscription } = useAuth();
     // @ts-ignore
@@ -107,6 +107,12 @@ export default function SubscriptionScreen() {
     };
 
     const handleSubscribe = async (planId: string) => {
+        const selectedPlanData = PLAN_DATA.find(p => p.type === planId);
+        if (!selectedPlanData) {
+            Alert.alert('Error', 'Plan not found');
+            return;
+        }
+
         if (planId === 'free_trial') {
             Alert.alert(
                 'Start Free Trial',
@@ -123,19 +129,14 @@ export default function SubscriptionScreen() {
             return;
         }
 
-        // Integration with payment gateway would go here
-        Alert.alert(
-            'Subscribe',
-            `Proceed to payment for ${planId} plan?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Pay Now',
-                    style: 'default',
-                    onPress: () => processSubscription(planId)
-                }
-            ]
-        );
+        const numericPrice = parseInt(selectedPlanData.price.replace('₹', ''));
+        navigation.navigate('Payment', {
+            planId,
+            planName: selectedPlanData.name,
+            amountRupees: numericPrice,
+            color: selectedPlanData.color,
+            autoPay,
+        });
     };
 
     const processSubscription = async (planId: string) => {

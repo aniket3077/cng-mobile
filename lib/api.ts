@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: `${API_URL || 'https://cng-backend.vercel.app'}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -17,6 +17,7 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    console.log(`📡 API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
     return config;
   },
   (error) => {
@@ -29,6 +30,24 @@ import { emitLogout } from './events';
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const status = error.response?.status;
+    const url = error.config?.url;
+    const errorMessage = error.response?.data?.error || error.message;
+    const isNearbyBillingDenied =
+      status === 502 &&
+      url === '/nearby-stations' &&
+      typeof errorMessage === 'string' &&
+      (errorMessage.includes('REQUEST_DENIED') || errorMessage.includes('enable Billing'));
+
+    if (isNearbyBillingDenied) {
+      console.warn('⚠️ Google Places unavailable for nearby stations. Using fallback station list.');
+    } else {
+      console.error(`❌ API Error:`, {
+        status,
+        url,
+        error: errorMessage,
+      });
+    }
     if (error.response?.status === 401) {
       await AsyncStorage.removeItem('authToken');
       await AsyncStorage.removeItem('user');
@@ -45,6 +64,7 @@ export const authApi = {
     phone: string;
     vehicleNo: string;
     password: string;
+    referralCode?: string;
   }) => {
     const response = await api.post('/auth/signup', data);
     return response.data;
@@ -63,6 +83,39 @@ export const authApi = {
       await AsyncStorage.removeItem('user');
     }
   },
+
+  forgotPassword: async (data: { identifier: string }) => {
+    const response = await api.post('/auth/reset-password', {
+      action: 'send',
+      identifier: data.identifier,
+    });
+    return response.data;
+  },
+
+  verifyOtp: async (data: { identifier: string; otp: string }) => {
+    const response = await api.post('/auth/reset-password', {
+      action: 'verify',
+      identifier: data.identifier,
+      otp: data.otp,
+    });
+    return response.data;
+  },
+
+  resetPassword: async (data: {
+    identifier: string;
+    newPassword: string;
+    otp?: string;
+    resetToken?: string;
+  }) => {
+    const response = await api.post('/auth/reset-password', {
+      action: 'reset',
+      identifier: data.identifier,
+      otp: data.otp,
+      resetToken: data.resetToken,
+      newPassword: data.newPassword,
+    });
+    return response.data;
+  },
 };
 
 export const stationsApi = {
@@ -75,6 +128,19 @@ export const stationsApi = {
     fuelType?: string;
   }) => {
     const response = await api.get('/stations', { params });
+    return response.data;
+  },
+};
+
+export const nearbyStationsApi = {
+  list: async (data: {
+    lat: number;
+    lng: number;
+    radius?: number;
+    limit?: number;
+    googleOnly?: boolean;
+  }) => {
+    const response = await api.post('/nearby-stations', data);
     return response.data;
   },
 };
@@ -146,6 +212,7 @@ export const routePlanningApi = {
     fuelType?: string;
     avoidTolls?: boolean;
     avoidHighways?: boolean;
+    googleMapsApiKey?: string;
   }) => {
     const response = await api.post('/routes/plan', data);
     return response.data;
@@ -195,6 +262,39 @@ export const customerProfileApi = {
     planType: string;
   }) => {
     const response = await api.post('/payments/verify', data);
+    return response.data;
+  },
+};
+
+export const referralApi = {
+  getReferralInfo: async () => {
+    const response = await api.get('/customer/referral');
+    return response.data;
+  },
+
+  applyReferralCode: async (referralCode: string) => {
+    const response = await api.post('/customer/referral', { referralCode });
+    return response.data;
+  },
+};
+
+export const payoutApi = {
+  getPayoutInfo: async () => {
+    const response = await api.get('/customer/payout');
+    return response.data;
+  },
+
+  requestPayout: async (data: {
+    amount: number;
+    payoutMethod: 'bank_transfer' | 'upi';
+    accountDetails: {
+      accountNumber: string;
+      ifsc: string;
+      accountHolderName: string;
+      upiId?: string;
+    };
+  }) => {
+    const response = await api.post('/customer/payout', data);
     return response.data;
   },
 };
