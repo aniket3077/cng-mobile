@@ -11,8 +11,8 @@ import {
     StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AppScreenProps } from '../types/navigation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -48,9 +48,13 @@ const SLIDES = [
 ];
 
 interface OnboardingScreenProps {
-    navigation: any;
+    navigation?: AppScreenProps<'Onboarding'>['navigation'];
     onComplete: (target?: string) => Promise<void>;
 }
+
+type ViewableItemPayload = {
+    index: number | null;
+};
 
 export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -72,8 +76,8 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
         await onComplete();
     };
 
-    const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-        if (viewableItems.length > 0) {
+    const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewableItemPayload[] }) => {
+        if (viewableItems.length > 0 && typeof viewableItems[0].index === 'number') {
             setCurrentIndex(viewableItems[0].index);
         }
     }).current;

@@ -1,583 +1,935 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  TextInput,
   ActivityIndicator,
+  Alert,
   Modal,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useColorScheme,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { payoutApi } from '../lib/api';
+import { authenticateSensitiveAction } from '../lib/biometrics';
+import { maskPayoutDestination } from '../lib/security';
+import { AppScreenProps } from '../types/navigation';
 
-interface PayoutData {
-  availableBalance: number;
-  totalEarnings: number;
-  pendingEarnings: number;
-  earnings: any[];
-  payoutRequests: any[];
+interface SavedMethod {
+  id: string;
+  type: 'upi' | 'bank_transfer';
+  label: string;
+  isDefault: boolean;
+  upiId?: string | null;
+  accountNumberMasked?: string | null;
+  accountHolderName?: string | null;
+  ifsc?: string | null;
 }
 
-export default function PayoutScreen() {
-  const [payoutData, setPayoutData] = useState<PayoutData | null>(null);
+interface PayoutDashboard {
+  wallet: {
+    availableBalance: number;
+    totalCommissionEarned: number;
+    pendingCommissions: number;
+    totalWithdrawn: number;
+    minimumWithdrawal: number;
+    maximumWithdrawal: number;
+    instantPayoutFee: string;
+    razorpayXIntegration: string;
+  };
+  savedPayoutMethods: SavedMethod[];
+  payoutHistory: Array<{
+    id: string;
+    amount: number;
+    feeAmount: number;
+    netAmount: number;
+    destination: string;
+    payoutMethod: string;
+    status: string;
+    statusMessage?: string | null;
+    riskStatus: string;
+    instantPayout: boolean;
+    createdAt: string;
+    referenceId?: string | null;
+    receiptLabel: string;
+  }>;
+  commissionLedger: Array<{
+    id: string;
+    referredUserName: string;
+    planName?: string | null;
+    amount: number;
+    remainingAmount: number;
+    status: string;
+    earnedAt: string;
+  }>;
+  security: {
+    otpRequired: boolean;
+    suspiciousPayoutsRequireAdminReview: boolean;
+    fraudStatus: string;
+    fraudScore: number;
+  };
+}
+
+const lightPalette = {
+  bg: '#EEF4FF',
+  card: '#FFFFFF',
+  mutedCard: 'rgba(255,255,255,0.84)',
+  text: '#0F172A',
+  textSoft: '#475569',
+  border: 'rgba(148,163,184,0.22)',
+  hero: ['#0B1020', '#142850', '#1D4ED8'] as const,
+};
+
+const darkPalette = {
+  bg: '#030712',
+  card: '#0B1326',
+  mutedCard: 'rgba(11,19,38,0.84)',
+  text: '#F8FAFC',
+  textSoft: '#9FB0CB',
+  border: 'rgba(148,163,184,0.16)',
+  hero: ['#020617', '#07142C', '#123B7A'] as const,
+};
+
+function formatCurrency(amount: number) {
+  return `₹${Math.round(amount).toLocaleString('en-IN')}`;
+}
+
+function getStatusMeta(status: string) {
+  switch (status) {
+    case 'completed':
+      return { bg: '#DCFCE7', text: '#166534', label: 'Completed' };
+    case 'processing':
+      return { bg: '#DBEAFE', text: '#1D4ED8', label: 'Processing' };
+    case 'pending':
+      return { bg: '#FEF3C7', text: '#92400E', label: 'Pending' };
+    case 'failed':
+      return { bg: '#FEE2E2', text: '#991B1B', label: 'Failed' };
+    default:
+      return { bg: '#E2E8F0', text: '#334155', label: status };
+  }
+}
+
+type Props = AppScreenProps<'Payout'>;
+
+export default function PayoutScreen({ navigation }: Props) {
+  const colorScheme = useColorScheme();
+  const palette = colorScheme === 'dark' ? darkPalette : lightPalette;
+  const [dashboard, setDashboard] = useState<PayoutDashboard | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showPayoutModal, setShowPayoutModal] = useState(false);
-  const [processingPayout, setProcessingPayout] = useState(false);
-  const [formData, setFormData] = useState({
+  const [refreshing, setRefreshing] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
     amount: '',
-    payoutMethod: 'bank_transfer' as 'bank_transfer' | 'upi',
+    payoutMethod: 'upi' as 'upi' | 'bank_transfer',
+    payoutMethodId: '',
+    instantPayout: true,
+    otpCode: '',
+    upiId: '',
     accountNumber: '',
     ifsc: '',
     accountHolderName: '',
-    upiId: '',
   });
 
   useEffect(() => {
     loadPayoutData();
   }, []);
 
-  const loadPayoutData = async () => {
-    try {
-      const data = await payoutApi.getPayoutInfo();
-      setPayoutData(data);
-    } catch (error) {
-      console.error('Failed to load payout data:', error);
-      Alert.alert('Error', 'Failed to load payout information');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePayoutRequest = async () => {
-    if (!formData.amount || parseFloat(formData.amount) < 100) {
-      Alert.alert('Error', 'Minimum payout amount is ₹100');
-      return;
-    }
-
-    if (parseFloat(formData.amount) > (payoutData?.availableBalance || 0)) {
-      Alert.alert('Error', 'Insufficient balance');
-      return;
-    }
-
-    if (formData.payoutMethod === 'bank_transfer') {
-      if (!formData.accountNumber || !formData.ifsc || !formData.accountHolderName) {
-        Alert.alert('Error', 'Please fill all bank details');
-        return;
-      }
+  const loadPayoutData = async (mode: 'initial' | 'refresh' = 'initial') => {
+    if (mode === 'refresh') {
+      setRefreshing(true);
     } else {
-      if (!formData.upiId) {
-        Alert.alert('Error', 'Please enter UPI ID');
-        return;
-      }
+      setLoading(true);
     }
 
-    setProcessingPayout(true);
     try {
-      const accountDetails = formData.payoutMethod === 'bank_transfer' 
-        ? {
-            accountNumber: formData.accountNumber,
-            ifsc: formData.ifsc,
-            accountHolderName: formData.accountHolderName,
-          }
-        : {
-            accountNumber: '',
-            ifsc: '',
-            accountHolderName: '',
-            upiId: formData.upiId,
-          };
-
-      const result = await payoutApi.requestPayout({
-        amount: parseFloat(formData.amount),
-        payoutMethod: formData.payoutMethod,
-        accountDetails,
-      });
-
-      Alert.alert('Success', result.message || 'Payout request submitted successfully!');
-      setShowPayoutModal(false);
-      resetForm();
-      loadPayoutData();
-    } catch (error: any) {
-      console.error('Error requesting payout:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to request payout');
+      const response = await payoutApi.getPayoutInfo();
+      setDashboard(response);
+    } catch (_error) {
+      Alert.alert('Unable to load', 'Payout information is unavailable right now.');
     } finally {
-      setProcessingPayout(false);
+      if (mode === 'refresh') {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
   const resetForm = () => {
-    setFormData({
+    setForm({
       amount: '',
-      payoutMethod: 'bank_transfer',
+      payoutMethod: 'upi',
+      payoutMethodId: '',
+      instantPayout: true,
+      otpCode: '',
+      upiId: '',
       accountNumber: '',
       ifsc: '',
       accountHolderName: '',
-      upiId: '',
     });
+  };
+
+  const selectedMethod = dashboard?.savedPayoutMethods.find((method) => method.id === form.payoutMethodId);
+  const feePreview = form.instantPayout ? Math.min((Number(form.amount) || 0) * 0.015, 25) : 0;
+  const netPreview = Math.max((Number(form.amount) || 0) - feePreview, 0);
+  const otpDestination = maskPayoutDestination(
+    selectedMethod?.upiId ||
+      selectedMethod?.accountNumberMasked ||
+      form.upiId ||
+      form.accountNumber,
+  );
+
+  const handleSubmit = async () => {
+    if (!dashboard) {
+      return;
+    }
+
+    const amount = Number(form.amount);
+    if (!amount || Number.isNaN(amount)) {
+      Alert.alert('Amount required', 'Enter a valid payout amount.');
+      return;
+    }
+    if (amount < dashboard.wallet.minimumWithdrawal || amount > dashboard.wallet.maximumWithdrawal) {
+      Alert.alert(
+        'Amount out of range',
+        `Withdrawals must be between ${formatCurrency(dashboard.wallet.minimumWithdrawal)} and ${formatCurrency(dashboard.wallet.maximumWithdrawal)}.`,
+      );
+      return;
+    }
+    if (amount > dashboard.wallet.availableBalance) {
+      Alert.alert('Insufficient balance', 'Your withdrawable balance is lower than this request.');
+      return;
+    }
+    if (form.otpCode.trim().length !== 6) {
+      Alert.alert('OTP required', 'Enter the 6-digit verification code.');
+      return;
+    }
+
+    if (!form.payoutMethodId) {
+      if (form.payoutMethod === 'upi' && !form.upiId.trim()) {
+        Alert.alert('UPI required', 'Enter your UPI ID.');
+        return;
+      }
+      if (
+        form.payoutMethod === 'bank_transfer' &&
+        (!form.accountNumber.trim() || !form.ifsc.trim() || !form.accountHolderName.trim())
+      ) {
+        Alert.alert('Bank details required', 'Complete the bank account details.');
+        return;
+      }
+    }
+
+    const biometricResult = await authenticateSensitiveAction('Confirm withdrawal');
+    if (!biometricResult.success) {
+      Alert.alert('Authentication Required', biometricResult.message);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await payoutApi.requestPayout({
+        amount,
+        payoutMethod: form.payoutMethod,
+        payoutMethodId: form.payoutMethodId || undefined,
+        instantPayout: form.instantPayout,
+        otpCode: form.otpCode,
+        accountDetails: form.payoutMethodId
+          ? undefined
+          : {
+              accountNumber: form.accountNumber,
+              ifsc: form.ifsc,
+              accountHolderName: form.accountHolderName,
+              upiId: form.upiId || undefined,
+            },
+      });
+
+      Alert.alert('Payout queued', response.payoutRequest?.statusMessage || 'Your payout request is being processed.');
+      setShowRequestModal(false);
+      resetForm();
+      await loadPayoutData('refresh');
+    } catch (error: any) {
+      Alert.alert('Payout failed', error.response?.data?.error || 'Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#0EA5E9" />
-        <Text style={styles.loadingText}>Loading payout data...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: palette.bg }]}>
+        <ActivityIndicator size="large" color="#60A5FA" />
+        <Text style={[styles.loadingText, { color: palette.textSoft }]}>Preparing payout center…</Text>
       </View>
     );
   }
 
+  if (!dashboard) {
+    return (
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: palette.bg }]}>
+        <TouchableOpacity onPress={() => loadPayoutData()} style={styles.retryButton}>
+          <Text style={styles.retryText}>Retry loading payouts</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Payouts</Text>
-        <Text style={styles.subtitle}>Withdraw your referral earnings</Text>
-      </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
+      <Modal visible={showRequestModal} transparent animationType="slide" onRequestClose={() => setShowRequestModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: palette.card }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: palette.text }]}>Withdraw commission</Text>
+              <TouchableOpacity style={styles.closeButton} onPress={() => setShowRequestModal(false)}>
+                <Ionicons name="close" size={18} color={palette.text} />
+              </TouchableOpacity>
+            </View>
 
-      <View style={styles.balanceContainer}>
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Available Balance</Text>
-          <Text style={styles.balanceAmount}>₹{payoutData?.availableBalance || 0}</Text>
-        </View>
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Total Earnings</Text>
-          <Text style={styles.balanceAmount}>₹{payoutData?.totalEarnings || 0}</Text>
-        </View>
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Pending Earnings</Text>
-          <Text style={styles.balanceAmount}>₹{payoutData?.pendingEarnings || 0}</Text>
-        </View>
-      </View>
-
-      <TouchableOpacity
-        style={styles.payoutButton}
-        onPress={() => setShowPayoutModal(true)}
-        disabled={(payoutData?.availableBalance || 0) < 100}
-      >
-        <Text style={styles.payoutButtonText}>Request Payout</Text>
-        <Text style={styles.payoutButtonSubtext}>
-          Min. ₹100 • Available: ₹{payoutData?.availableBalance || 0}
-        </Text>
-      </TouchableOpacity>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Payout History</Text>
-        {payoutData?.payoutRequests && payoutData.payoutRequests.length > 0 ? (
-          payoutData.payoutRequests.map((request, index) => (
-            <View key={request.id || index} style={styles.payoutItem}>
-              <View style={styles.payoutInfo}>
-                <Text style={styles.payoutAmount}>₹{request.amount}</Text>
-                <Text style={styles.payoutMethod}>{request.payoutMethod}</Text>
-                <Text style={styles.payoutDate}>
-                  {new Date(request.createdAt).toLocaleDateString()}
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                <Text style={[styles.inputLabel, { color: palette.text }]}>Amount</Text>
+                <TextInput
+                  value={form.amount}
+                  onChangeText={(value) => setForm((current) => ({ ...current, amount: value.replace(/[^0-9.]/g, '') }))}
+                  placeholder="Enter amount"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  style={[styles.input, { color: palette.text }]}
+                />
+                <Text style={[styles.helperText, { color: palette.textSoft }]}>
+                  Fee {formatCurrency(feePreview)} • Net {formatCurrency(netPreview)}
                 </Text>
               </View>
-              <View style={[styles.statusBadge, getStatusStyle(request.status)]}>
-                <Text style={styles.statusText}>{request.status}</Text>
-              </View>
-            </View>
-          ))
-        ) : (
-          <Text style={styles.emptyText}>No payout requests yet</Text>
-        )}
-      </View>
 
-      <Modal
-        visible={showPayoutModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowPayoutModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowPayoutModal(false)}>
-              <Text style={styles.cancelButton}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Request Payout</Text>
-            <View style={styles.placeholder} />
-          </View>
+              {dashboard.savedPayoutMethods.length > 0 ? (
+                <View style={styles.savedMethodsSection}>
+                  {dashboard.savedPayoutMethods.map((method) => (
+                    <TouchableOpacity
+                      key={method.id}
+                      onPress={() => setForm((current) => ({
+                        ...current,
+                        payoutMethodId: current.payoutMethodId === method.id ? '' : method.id,
+                        payoutMethod: method.type,
+                      }))}
+                      style={[
+                        styles.savedMethodCard,
+                        {
+                          backgroundColor: form.payoutMethodId === method.id ? 'rgba(96,165,250,0.14)' : palette.mutedCard,
+                          borderColor: form.payoutMethodId === method.id ? '#60A5FA' : palette.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.savedMethodCopy}>
+                        <Text style={[styles.savedMethodTitle, { color: palette.text }]}>{method.label}</Text>
+                        <Text style={[styles.savedMethodBody, { color: palette.textSoft }]}>
+                          {method.type === 'upi'
+                            ? method.upiId
+                            : `${method.accountNumberMasked || ''} ${method.ifsc || ''}`.trim()}
+                        </Text>
+                      </View>
+                      {method.isDefault ? <Text style={styles.defaultChip}>Default</Text> : null}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
 
-          <ScrollView style={styles.modalContent}>
-            <View style={styles.formSection}>
-              <Text style={styles.formLabel}>Amount (₹)</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="Enter amount"
-                value={formData.amount}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, amount: text.replace(/[^0-9.]/g, '') }))}
-                keyboardType="numeric"
-              />
-              <Text style={styles.formHint}>
-                Available: ₹{payoutData?.availableBalance || 0} • Min: ₹100 • Max: ₹50000
-              </Text>
-            </View>
-
-            <View style={styles.formSection}>
-              <Text style={styles.formLabel}>Payout Method</Text>
-              <View style={styles.methodContainer}>
+              <View style={styles.toggleRow}>
                 <TouchableOpacity
-                  style={[
-                    styles.methodButton,
-                    formData.payoutMethod === 'bank_transfer' && styles.selectedMethod,
-                  ]}
-                  onPress={() => setFormData(prev => ({ ...prev, payoutMethod: 'bank_transfer' }))}
+                  style={[styles.togglePill, form.payoutMethod === 'upi' && styles.togglePillActive]}
+                  onPress={() => setForm((current) => ({ ...current, payoutMethod: 'upi', payoutMethodId: '' }))}
                 >
-                  <Text style={[
-                    styles.methodText,
-                    formData.payoutMethod === 'bank_transfer' && styles.selectedMethodText,
-                  ]}>
-                    Bank Transfer
-                  </Text>
+                  <Text style={[styles.toggleText, form.payoutMethod === 'upi' && styles.toggleTextActive]}>UPI</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[
-                    styles.methodButton,
-                    formData.payoutMethod === 'upi' && styles.selectedMethod,
-                  ]}
-                  onPress={() => setFormData(prev => ({ ...prev, payoutMethod: 'upi' }))}
+                  style={[styles.togglePill, form.payoutMethod === 'bank_transfer' && styles.togglePillActive]}
+                  onPress={() => setForm((current) => ({ ...current, payoutMethod: 'bank_transfer', payoutMethodId: '' }))}
                 >
-                  <Text style={[
-                    styles.methodText,
-                    formData.payoutMethod === 'upi' && styles.selectedMethodText,
-                  ]}>
-                    UPI
-                  </Text>
+                  <Text style={[styles.toggleText, form.payoutMethod === 'bank_transfer' && styles.toggleTextActive]}>Bank</Text>
                 </TouchableOpacity>
               </View>
-            </View>
 
-            {formData.payoutMethod === 'bank_transfer' ? (
-              <>
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>Account Holder Name</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="Enter account holder name"
-                    value={formData.accountHolderName}
-                    onChangeText={(text) => setFormData(prev => ({ ...prev, accountHolderName: text }))}
+              {!selectedMethod ? (
+                <>
+                  {form.payoutMethod === 'upi' ? (
+                    <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                      <Text style={[styles.inputLabel, { color: palette.text }]}>UPI ID</Text>
+                      <TextInput
+                        value={form.upiId}
+                        onChangeText={(value) => setForm((current) => ({ ...current, upiId: value }))}
+                        placeholder="yourname@bank"
+                        placeholderTextColor="#94A3B8"
+                        autoCapitalize="none"
+                        style={[styles.input, { color: palette.text }]}
+                      />
+                    </View>
+                  ) : (
+                    <>
+                      <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                        <Text style={[styles.inputLabel, { color: palette.text }]}>Account holder</Text>
+                        <TextInput
+                          value={form.accountHolderName}
+                          onChangeText={(value) => setForm((current) => ({ ...current, accountHolderName: value }))}
+                          placeholder="Enter account holder name"
+                          placeholderTextColor="#94A3B8"
+                          style={[styles.input, { color: palette.text }]}
+                        />
+                      </View>
+                      <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                        <Text style={[styles.inputLabel, { color: palette.text }]}>Account number</Text>
+                        <TextInput
+                          value={form.accountNumber}
+                          onChangeText={(value) => setForm((current) => ({ ...current, accountNumber: value.replace(/[^0-9]/g, '') }))}
+                          placeholder="Enter account number"
+                          placeholderTextColor="#94A3B8"
+                          keyboardType="numeric"
+                          style={[styles.input, { color: palette.text }]}
+                        />
+                      </View>
+                      <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                        <Text style={[styles.inputLabel, { color: palette.text }]}>IFSC</Text>
+                        <TextInput
+                          value={form.ifsc}
+                          onChangeText={(value) => setForm((current) => ({ ...current, ifsc: value.toUpperCase() }))}
+                          placeholder="Enter IFSC"
+                          placeholderTextColor="#94A3B8"
+                          autoCapitalize="characters"
+                          style={[styles.input, { color: palette.text }]}
+                        />
+                      </View>
+                    </>
+                  )}
+                </>
+              ) : null}
+
+              <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchCopy}>
+                    <Text style={[styles.inputLabel, { color: palette.text }]}>Instant payout</Text>
+                    <Text style={[styles.helperText, { color: palette.textSoft }]}>
+                      {dashboard.wallet.instantPayoutFee}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={form.instantPayout}
+                    onValueChange={(value) => setForm((current) => ({ ...current, instantPayout: value }))}
+                    trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+                    thumbColor={form.instantPayout ? '#2563EB' : '#94A3B8'}
                   />
                 </View>
+              </View>
 
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>Account Number</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="Enter account number"
-                    value={formData.accountNumber}
-                    onChangeText={(text) => setFormData(prev => ({ ...prev, accountNumber: text.replace(/[^0-9]/g, '') }))}
-                    keyboardType="numeric"
-                    maxLength={18}
-                  />
-                </View>
-
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>IFSC Code</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="Enter IFSC code"
-                    value={formData.ifsc}
-                    onChangeText={(text) => setFormData(prev => ({ ...prev, ifsc: text.toUpperCase() }))}
-                    autoCapitalize="characters"
-                    maxLength={11}
-                  />
-                </View>
-              </>
-            ) : (
-              <View style={styles.formSection}>
-                <Text style={styles.formLabel}>UPI ID</Text>
+              <View style={[styles.inputCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                <Text style={[styles.inputLabel, { color: palette.text }]}>OTP verification</Text>
                 <TextInput
-                  style={styles.formInput}
-                  placeholder="Enter UPI ID (e.g., user@paytm)"
-                  value={formData.upiId}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, upiId: text }))}
-                  autoCapitalize="none"
+                  value={form.otpCode}
+                  onChangeText={(value) => setForm((current) => ({ ...current, otpCode: value.replace(/[^0-9]/g, '') }))}
+                  placeholder="Enter 6-digit OTP"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  maxLength={6}
+                  style={[styles.input, { color: palette.text }]}
                 />
+                <Text style={[styles.helperText, { color: palette.textSoft }]}>
+                  Verify this withdrawal for {otpDestination}.
+                </Text>
               </View>
-            )}
 
-            <TouchableOpacity
-              style={[styles.submitButton, processingPayout && styles.disabledButton]}
-              onPress={handlePayoutRequest}
-              disabled={processingPayout}
-            >
-              {processingPayout ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.submitButtonText}>Submit Request</Text>
-              )}
-            </TouchableOpacity>
-          </ScrollView>
+              <TouchableOpacity onPress={handleSubmit} disabled={submitting}>
+                <LinearGradient colors={['#2563EB', '#7C3AED']} style={styles.primaryButton}>
+                  {submitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryButtonText}>Submit withdrawal</Text>
+                      <Ionicons name="arrow-forward" size={18} color="#fff" />
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
         </View>
       </Modal>
-    </ScrollView>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <LinearGradient colors={palette.hero} style={styles.heroCard}>
+          <View style={styles.heroTopRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.heroButton}>
+              <Ionicons name="arrow-back" size={20} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => loadPayoutData('refresh')} style={styles.heroButton}>
+              {refreshing ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="refresh" size={18} color="#fff" />}
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.heroEyebrow}>RazorpayX payout center</Text>
+          <Text style={styles.heroTitle}>Withdraw verified subscription commissions securely.</Text>
+          <Text style={styles.heroSubtitle}>
+            OTP-secured withdrawals, saved payout methods, and admin review for suspicious requests.
+          </Text>
+
+          <View style={styles.heroBalanceCard}>
+            <Text style={styles.heroBalanceLabel}>Available now</Text>
+            <Text style={styles.heroBalanceValue}>{formatCurrency(dashboard.wallet.availableBalance)}</Text>
+            <Text style={styles.heroBalanceMeta}>
+              Min {formatCurrency(dashboard.wallet.minimumWithdrawal)} • {dashboard.wallet.instantPayoutFee}
+            </Text>
+          </View>
+
+          <TouchableOpacity onPress={() => setShowRequestModal(true)}>
+            <LinearGradient colors={['#FDE68A', '#F59E0B']} style={styles.withdrawButton}>
+              <Ionicons name="wallet" size={16} color="#0F172A" />
+              <Text style={styles.withdrawButtonText}>Request withdrawal</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </LinearGradient>
+
+        <View style={styles.metricsGrid}>
+          {[
+            { label: 'Total earned', value: formatCurrency(dashboard.wallet.totalCommissionEarned), tint: '#8B5CF6', icon: 'sparkles' },
+            { label: 'Pending review', value: formatCurrency(dashboard.wallet.pendingCommissions), tint: '#F59E0B', icon: 'time' },
+            { label: 'Total withdrawn', value: formatCurrency(dashboard.wallet.totalWithdrawn), tint: '#10B981', icon: 'cash' },
+            { label: 'Fraud score', value: dashboard.security.fraudScore.toString(), tint: '#EF4444', icon: 'shield-checkmark' },
+          ].map((item) => (
+            <View key={item.label} style={[styles.metricCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+              <View style={[styles.metricIcon, { backgroundColor: `${item.tint}1F` }]}>
+                <Ionicons name={item.icon as any} size={18} color={item.tint} />
+              </View>
+              <Text style={[styles.metricValue, { color: palette.text }]}>{item.value}</Text>
+              <Text style={[styles.metricLabel, { color: palette.textSoft }]}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Saved payout methods</Text>
+          <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+            Reuse verified payout destinations for faster withdrawals.
+          </Text>
+          {dashboard.savedPayoutMethods.length > 0 ? (
+            dashboard.savedPayoutMethods.map((method) => (
+              <View key={method.id} style={[styles.methodCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                <View>
+                  <Text style={[styles.methodTitle, { color: palette.text }]}>{method.label}</Text>
+                  <Text style={[styles.methodBody, { color: palette.textSoft }]}>
+                    {method.type === 'upi'
+                      ? method.upiId
+                      : `${method.accountNumberMasked || ''} ${method.ifsc || ''}`.trim()}
+                  </Text>
+                </View>
+                {method.isDefault ? <Text style={styles.defaultChip}>Default</Text> : null}
+              </View>
+            ))
+          ) : (
+            <Text style={[styles.emptyText, { color: palette.textSoft }]}>
+              Your first withdrawal method will be saved automatically after submission.
+            </Text>
+          )}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Withdrawal history</Text>
+          <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+            Track every payout request from queue to completion.
+          </Text>
+          {dashboard.payoutHistory.length > 0 ? (
+            dashboard.payoutHistory.map((item) => {
+              const badge = getStatusMeta(item.status);
+              return (
+                <View key={item.id} style={[styles.historyCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}>
+                  <View style={styles.historyTopRow}>
+                    <View>
+                      <Text style={[styles.historyAmount, { color: palette.text }]}>{formatCurrency(item.netAmount)}</Text>
+                      <Text style={[styles.historyBody, { color: palette.textSoft }]}>
+                        {item.destination} • Fee {formatCurrency(item.feeAmount)}
+                      </Text>
+                    </View>
+                    <View style={[styles.badgePill, { backgroundColor: badge.bg }]}>
+                      <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.historyBody, { color: palette.textSoft }]}>
+                    {item.referenceId || item.id.slice(-6)} • {new Date(item.createdAt).toLocaleString('en-IN')}
+                  </Text>
+                  {item.statusMessage ? (
+                    <Text style={[styles.historyBody, { color: palette.textSoft }]}>
+                      {item.statusMessage}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })
+          ) : (
+            <Text style={[styles.emptyText, { color: palette.textSoft }]}>
+              No payout requests yet.
+            </Text>
+          )}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Commission ledger</Text>
+          <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+            Remaining withdrawable amount across your verified commission entries.
+          </Text>
+          {dashboard.commissionLedger.slice(0, 6).map((entry) => (
+            <View key={entry.id} style={[styles.ledgerRow, { borderColor: palette.border }]}>
+              <View>
+                <Text style={[styles.ledgerTitle, { color: palette.text }]}>{entry.referredUserName}</Text>
+                <Text style={[styles.ledgerBody, { color: palette.textSoft }]}>
+                  {entry.planName || 'Paid subscription'} • Remaining {formatCurrency(entry.remainingAmount)}
+                </Text>
+              </View>
+              <Text style={[styles.ledgerAmount, { color: palette.text }]}>{formatCurrency(entry.amount)}</Text>
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
-
-const getStatusStyle = (status: string) => {
-  switch (status) {
-    case 'completed':
-      return styles.completedStatus;
-    case 'pending':
-      return styles.pendingStatus;
-    case 'processing':
-      return styles.processingStatus;
-    case 'failed':
-      return styles.failedStatus;
-    case 'available':
-      return styles.availableStatus;
-    case 'paid':
-      return styles.paidStatus;
-    default:
-      return styles.defaultStatus;
-  }
-};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
+    paddingHorizontal: 24,
   },
   loadingText: {
-    marginTop: 16,
-    color: '#64748b',
-    fontSize: 16,
+    marginTop: 14,
+    fontSize: 14,
   },
-  header: {
-    padding: 24,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+  retryButton: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 8,
+  retryText: {
+    color: '#fff',
+    fontWeight: '700',
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#64748b',
-    textAlign: 'center',
+  scrollContent: {
+    paddingBottom: 28,
   },
-  balanceContainer: {
+  heroCard: {
+    margin: 16,
+    borderRadius: 28,
+    padding: 20,
+  },
+  heroTopRow: {
     flexDirection: 'row',
-    padding: 16,
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  heroButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 34,
+    marginTop: 10,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 10,
+  },
+  heroBalanceCard: {
+    marginTop: 20,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    padding: 18,
+  },
+  heroBalanceLabel: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroBalanceValue: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  heroBalanceMeta: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    marginTop: 6,
+  },
+  withdrawButton: {
+    marginTop: 16,
+    borderRadius: 18,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  withdrawButtonText: {
+    color: '#0F172A',
+    fontWeight: '800',
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
+    paddingHorizontal: 16,
   },
-  balanceCard: {
-    flex: 1,
-    backgroundColor: '#fff',
+  metricCard: {
+    width: '48%',
+    borderRadius: 22,
+    borderWidth: 1,
     padding: 16,
-    borderRadius: 12,
+  },
+  metricIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    justifyContent: 'center',
+    marginBottom: 14,
   },
-  balanceLabel: {
-    fontSize: 12,
-    color: '#64748b',
-    marginBottom: 4,
+  metricValue: {
+    fontSize: 22,
+    fontWeight: '800',
   },
-  balanceAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#0EA5E9',
+  metricLabel: {
+    marginTop: 6,
+    fontSize: 13,
   },
-  payoutButton: {
-    margin: 16,
-    backgroundColor: '#0EA5E9',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  payoutButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  payoutButtonSubtext: {
-    color: '#fff',
-    fontSize: 12,
-    marginTop: 4,
-    opacity: 0.9,
-  },
-  section: {
-    margin: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  sectionCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 18,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 16,
+    fontWeight: '800',
   },
-  payoutItem: {
+  sectionSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  methodCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
   },
-  payoutInfo: {
-    flex: 1,
-  },
-  payoutAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1e293b',
-  },
-  payoutMethod: {
+  methodTitle: {
     fontSize: 14,
-    color: '#64748b',
-    marginTop: 2,
+    fontWeight: '700',
   },
-  payoutDate: {
+  methodBody: {
+    marginTop: 4,
     fontSize: 12,
-    color: '#94a3b8',
-    marginTop: 2,
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    minWidth: 60,
+  defaultChip: {
+    color: '#2563EB',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  historyCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
+  },
+  historyTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  statusText: {
+  historyAmount: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  historyBody: {
+    marginTop: 6,
     fontSize: 12,
-    fontWeight: '600',
+    lineHeight: 18,
   },
-  completedStatus: {
-    backgroundColor: '#dcfce7',
+  badgePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
   },
-  pendingStatus: {
-    backgroundColor: '#fef3c7',
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
-  processingStatus: {
-    backgroundColor: '#dbeafe',
+  ledgerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderTopWidth: 1,
   },
-  failedStatus: {
-    backgroundColor: '#fee2e2',
+  ledgerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
   },
-  availableStatus: {
-    backgroundColor: '#dcfce7',
+  ledgerBody: {
+    marginTop: 4,
+    fontSize: 12,
   },
-  paidStatus: {
-    backgroundColor: '#e0e7ff',
-  },
-  defaultStatus: {
-    backgroundColor: '#f1f5f9',
+  ledgerAmount: {
+    fontSize: 16,
+    fontWeight: '800',
   },
   emptyText: {
-    textAlign: 'center',
-    color: '#64748b',
-    fontStyle: 'italic',
-    paddingVertical: 20,
+    fontSize: 13,
+    marginTop: 12,
+    lineHeight: 19,
   },
-  modalContainer: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(2,6,23,0.48)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    maxHeight: '88%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-  },
-  cancelButton: {
-    fontSize: 16,
-    color: '#64748b',
+    marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1e293b',
+    fontSize: 20,
+    fontWeight: '800',
   },
-  placeholder: {
-    width: 50,
+  closeButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(148,163,184,0.12)',
   },
-  modalContent: {
-    flex: 1,
-    padding: 16,
-  },
-  formSection: {
-    marginBottom: 20,
-  },
-  formLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1e293b',
-    marginBottom: 8,
-  },
-  formInput: {
+  inputCard: {
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
+    padding: 14,
+    marginBottom: 12,
   },
-  formHint: {
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  input: {
+    marginTop: 10,
+    fontSize: 15,
+    paddingVertical: 0,
+  },
+  helperText: {
+    marginTop: 8,
     fontSize: 12,
-    color: '#64748b',
-    marginTop: 4,
+    lineHeight: 18,
   },
-  methodContainer: {
+  savedMethodsSection: {
+    marginBottom: 12,
+  },
+  savedMethodCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 10,
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  savedMethodCopy: {
+    flex: 1,
+  },
+  savedMethodTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  savedMethodBody: {
+    marginTop: 4,
+    fontSize: 12,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  togglePill: {
+    flex: 1,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  togglePillActive: {
+    backgroundColor: '#2563EB',
+  },
+  toggleText: {
+    color: '#334155',
+    fontWeight: '700',
+  },
+  toggleTextActive: {
+    color: '#fff',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 12,
   },
-  methodButton: {
+  switchCopy: {
     flex: 1,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    alignItems: 'center',
   },
-  selectedMethod: {
-    backgroundColor: '#0EA5E9',
-    borderColor: '#0EA5E9',
-  },
-  methodText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  selectedMethodText: {
-    color: '#fff',
-  },
-  submitButton: {
-    backgroundColor: '#0EA5E9',
+  primaryButton: {
+    borderRadius: 18,
     paddingVertical: 16,
-    borderRadius: 8,
+    marginTop: 8,
     alignItems: 'center',
-    marginTop: 20,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
-  disabledButton: {
-    backgroundColor: '#94a3b8',
-  },
-  submitButtonText: {
+  primaryButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
 });

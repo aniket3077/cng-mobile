@@ -23,13 +23,11 @@ import {
   passwordResetStorage,
   PasswordResetSession,
 } from '../lib/passwordReset';
+import { AppScreenProps } from '../types/navigation';
 
 const { height } = Dimensions.get('window');
 
-interface Props {
-  navigation: any;
-  route: any;
-}
+type Props = AppScreenProps<'ResetPassword'>;
 
 export default function ResetPasswordScreen({ navigation, route }: Props) {
   const [newPassword, setNewPassword] = useState('');
@@ -39,6 +37,7 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [session, setSession] = useState<PasswordResetSession | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const routeIdentifier = route.params?.identifier || '';
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
@@ -69,8 +68,8 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
   useEffect(() => {
     const loadSession = async () => {
       const savedSession = await passwordResetStorage.getSession();
-      const routeIdentifier = route?.params?.identifier;
-      const sessionExpired = !savedSession?.resetTokenExpiresAt || savedSession.resetTokenExpiresAt <= Date.now();
+      const sessionExpired =
+        !savedSession?.resetTokenExpiresAt || savedSession.resetTokenExpiresAt <= Date.now();
 
       if (
         !savedSession ||
@@ -94,16 +93,21 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
     };
 
     void loadSession();
-  }, [navigation, route?.params?.identifier]);
+  }, [navigation, routeIdentifier]);
 
   const passwordStrength = getPasswordStrength(newPassword);
   const passwordsMatch = confirmPassword.length > 0 && newPassword === confirmPassword;
-  const isFormValid = Boolean(session?.resetToken) && passwordStrength.isValid && passwordsMatch;
+  const isFormValid = Boolean(session?.identifier && session?.resetToken) && passwordStrength.isValid && passwordsMatch;
 
   const handleResetPassword = async () => {
-    if (!session?.resetToken) {
-      Alert.alert('Reset Session Expired', 'Please verify a fresh OTP to continue.');
-      navigation.replace('ForgotPassword');
+    if (!session?.identifier || !session.resetToken) {
+      await passwordResetStorage.clearSession();
+      Alert.alert('Reset Session Expired', 'Please verify a fresh OTP to continue.', [
+        {
+          text: 'Start Again',
+          onPress: () => navigation.replace('ForgotPassword'),
+        },
+      ]);
       return;
     }
 
@@ -141,7 +145,8 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
         Alert.alert('Unable to Reset Password', response.message || 'Please try again.');
       }
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to reset password. Please try again.';
+      const message =
+        error.response?.data?.error || error.message || 'Failed to reset password. Please try again.';
       const shouldRestartFlow =
         message.toLowerCase().includes('expired') || message.toLowerCase().includes('session');
 

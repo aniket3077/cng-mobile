@@ -23,12 +23,11 @@ import {
   normalizeResetIdentifier,
   passwordResetStorage,
 } from '../lib/passwordReset';
+import { AppScreenProps } from '../types/navigation';
 
 const { height } = Dimensions.get('window');
 
-interface Props {
-  navigation: any;
-}
+type Props = AppScreenProps<'ForgotPassword'>;
 
 export default function ForgotPasswordScreen({ navigation }: Props) {
   const [identifier, setIdentifier] = useState('');
@@ -82,7 +81,12 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      const response = await authApi.forgotPassword({ identifier: normalizedIdentifier });
+      const existingSession = await passwordResetStorage.getSession();
+      const response = await authApi.forgotPassword({
+        identifier: normalizedIdentifier,
+        sessionToken:
+          existingSession?.identifier === normalizedIdentifier ? existingSession.sessionToken : undefined,
+      });
       const now = Date.now();
 
       await passwordResetStorage.saveSession({
@@ -91,6 +95,8 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
         identifier: normalizedIdentifier,
         otpExpiresAt: now + (response.expiresIn || 600) * 1000,
         resendAvailableAt: now + (response.resendAfter || 60) * 1000,
+        sessionToken: response.sessionToken,
+        accountType: response.accountType || 'customer',
       });
 
       navigation.navigate('EnterOtp', {

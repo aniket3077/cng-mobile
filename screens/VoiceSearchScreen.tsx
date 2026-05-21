@@ -12,11 +12,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import * as Location from 'expo-location';
 import { colors, spacing } from '../theme';
+import { featureFlags } from '../lib/featureFlags';
 import { nearbyStationsApi, stationsApi, voiceQueryApi } from '../lib/api';
+import { AppScreenProps } from '../types/navigation';
+import { sanitizeVoiceQuery } from '../lib/security';
 
-interface Props {
-  navigation: any;
-}
+type Props = AppScreenProps<'VoiceSearch'>;
 
 export default function VoiceSearchScreen({ navigation }: Props) {
   const [isListening, setIsListening] = useState(false);
@@ -49,26 +50,27 @@ export default function VoiceSearchScreen({ navigation }: Props) {
 
   const startVoiceRecognition = async () => {
     try {
-      // Note: expo-speech doesn't have voice recognition
-      // For production, use @react-native-voice/voice or Google Speech API
+      if (!featureFlags.enableVoiceDemoQueries) {
+        Alert.alert(
+          'Voice input unavailable',
+          'This build does not include speech-to-text capture. You can still use the quick voice command suggestions below.',
+        );
+        return;
+      }
 
       setIsListening(true);
       speak('I am listening. Please tell me what you need.');
 
-      // Simulate voice recognition for demo
       setTimeout(() => {
         simulateVoiceInput();
       }, 3000);
-
-    } catch (error) {
-      console.error('Voice recognition error:', error);
+    } catch (_error) {
       Alert.alert('Error', 'Failed to start voice recognition');
       setIsListening(false);
     }
   };
 
   const simulateVoiceInput = () => {
-    // For demo - in production, this would be actual voice recognition
     const sampleQueries = [
       'Find nearby CNG pump',
       'Navigate to nearest CNG station',
@@ -83,6 +85,12 @@ export default function VoiceSearchScreen({ navigation }: Props) {
   };
 
   const processVoiceQuery = async (query: string) => {
+    const sanitizedQuery = sanitizeVoiceQuery(query);
+    if (!sanitizedQuery) {
+      Alert.alert('Voice query empty', 'Please try again with a clearer request.');
+      return;
+    }
+
     setProcessingQuery(true);
 
     try {
@@ -105,13 +113,13 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       }
 
       const res = await voiceQueryApi.processQuery({
-        query,
+        query: sanitizedQuery,
         lat,
         lng,
       });
 
       if (!res?.success) {
-        const handled = await handleLocalVoiceFallback(query, lat, lng, res?.error);
+        const handled = await handleLocalVoiceFallback(sanitizedQuery, lat, lng, res?.error);
         if (!handled) {
           speak('Sorry, I could not process your request right now.');
         }
@@ -146,8 +154,7 @@ export default function VoiceSearchScreen({ navigation }: Props) {
         navigation.navigate('MapHome');
       }, 1500);
     } catch (error) {
-      console.error('Process query error:', error);
-      const handled = await handleLocalVoiceFallback(query, undefined, undefined);
+      const handled = await handleLocalVoiceFallback(sanitizedQuery, undefined, undefined);
       if (!handled) {
         speak('Sorry, I encountered an error processing your request');
       }
@@ -195,9 +202,9 @@ export default function VoiceSearchScreen({ navigation }: Props) {
             (message.includes('REQUEST_DENIED') || message.includes('enable Billing'));
 
           if (isNearbyBillingDenied) {
-            console.warn('Google nearby API unavailable for voice fallback. Using station fallback list.');
+            // Silent fallback to approved station list.
           } else {
-            console.error('Google nearby stations fallback error:', googleError);
+            // Silent fallback to approved station list.
           }
           googleResponse = null;
         }
@@ -291,8 +298,7 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       }, 1200);
 
       return true;
-    } catch (fallbackError) {
-      console.error('Local voice fallback error:', fallbackError);
+    } catch (_fallbackError) {
       return false;
     }
   };
@@ -379,6 +385,10 @@ export default function VoiceSearchScreen({ navigation }: Props) {
               key={index}
               style={styles.suggestionChip}
               onPress={() => {
+                if (!featureFlags.enableVoiceDemoQueries) {
+                  Alert.alert('Voice unavailable', 'Voice queries are not available in this build.');
+                  return;
+                }
                 setRecognizedText(suggestion);
                 processVoiceQuery(suggestion);
               }}

@@ -22,15 +22,14 @@ import { authApi } from '../lib/api';
 import { authStorage } from '../lib/auth';
 import { useAuth } from '../lib/authContext';
 import { passwordResetStorage } from '../lib/passwordReset';
+import { AppScreenProps } from '../types/navigation';
 
 const { width, height } = Dimensions.get('window');
 
-interface Props {
-  navigation: any;
-}
+type Props = AppScreenProps<'Login'>;
 
 export default function LoginScreen({ navigation }: Props) {
-  const { setIsAuthenticated } = useAuth();
+  const { checkAuth, setIsAuthenticated } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -65,26 +64,30 @@ export default function LoginScreen({ navigation }: Props) {
   }, []);
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
       Alert.alert('Error', 'Please enter email and password');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await authApi.login({ email, password });
+      const response = await authApi.login({ email: normalizedEmail, password });
 
-      if (response.success) {
-        await authStorage.saveToken(response.token);
-        await authStorage.saveUser(response.user);
-        setIsAuthenticated(true);
-        navigation.replace('Main');
-      } else {
-        Alert.alert('Error', response.message || 'Login failed');
+      if (!response?.token || !response?.user) {
+        Alert.alert('Error', response?.message || 'Login failed');
+        return;
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Error', 'Login failed. Please try again.');
+
+      await authStorage.saveSession(response.token, response.refreshToken);
+      await authStorage.saveUser(response.user);
+
+      setIsAuthenticated(true);
+      await checkAuth();
+    } catch (error: any) {
+      const message = error.response?.data?.error || 'Login failed. Please try again.';
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }

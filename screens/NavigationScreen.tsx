@@ -173,7 +173,7 @@ export default function NavigationScreen({ navigation, route }: Props) {
       [
         {
           text: 'End Navigation',
-          onPress: () => navigation.goBack(),
+          onPress: () => navigation?.goBack(),
         },
       ]
     );
@@ -231,7 +231,7 @@ export default function NavigationScreen({ navigation, route }: Props) {
             if (locationSubscription) {
               locationSubscription.remove();
             }
-            navigation.goBack();
+            navigation?.goBack();
           },
         },
       ]

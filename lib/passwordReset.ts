@@ -1,6 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureStorage } from './secureStorage';
+import { storageKeys } from './storageKeys';
 
-const PASSWORD_RESET_SESSION_KEY = 'passwordResetSession';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export interface PasswordRule {
@@ -16,13 +16,21 @@ export interface PasswordStrengthState {
 }
 
 export interface PasswordResetSession {
+  accountType: 'user' | 'owner';
   deliveryChannel: 'email';
   deliveryTarget: string;
   identifier: string;
   otpExpiresAt: number;
   resendAvailableAt: number;
+  sendCount?: number;
+  sendWindowStartedAt?: number;
+  verifyAttempts?: number;
+  otpHash?: string;
+  sessionToken?: string;
   resetToken?: string;
+  resetTokenHash?: string;
   resetTokenExpiresAt?: number;
+  lastSentAt?: number;
 }
 
 export function isEmailIdentifier(value: string) {
@@ -133,11 +141,11 @@ export function getPasswordStrength(password: string): PasswordStrengthState {
 
 export const passwordResetStorage = {
   async clearSession() {
-    await AsyncStorage.removeItem(PASSWORD_RESET_SESSION_KEY);
+    await secureStorage.removeItem(storageKeys.passwordResetSession);
   },
 
   async getSession(): Promise<PasswordResetSession | null> {
-    const serializedSession = await AsyncStorage.getItem(PASSWORD_RESET_SESSION_KEY);
+    const serializedSession = await secureStorage.getItem(storageKeys.passwordResetSession);
     if (!serializedSession) {
       return null;
     }
@@ -146,7 +154,7 @@ export const passwordResetStorage = {
   },
 
   async saveSession(session: PasswordResetSession) {
-    await AsyncStorage.setItem(PASSWORD_RESET_SESSION_KEY, JSON.stringify(session));
+    await secureStorage.setItem(storageKeys.passwordResetSession, JSON.stringify(session));
   },
 
   async updateSession(update: Partial<PasswordResetSession>) {

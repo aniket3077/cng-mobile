@@ -1,646 +1,614 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Dimensions, ActivityIndicator, Switch, Linking, NativeModules } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Switch,
+  Linking,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { customerProfileApi } from '../lib/api';
 import { authStorage } from '../lib/auth';
 import { useAuth } from '../lib/authContext';
-import RazorpayCheckout from 'react-native-razorpay';
-
-const { width } = Dimensions.get('window');
+import type { AppStackParamList } from '../types/navigation';
 
 const PLAN_DATA = [
-    {
-        type: 'free_trial',
-        name: 'Free Trial',
-        price: '₹0',
-        duration: '/15 days',
-        color: '#10B981',
-        features: [
-            'Ad-free experience',
-            'Basic routing',
-            'Save up to 5 stations',
-            'Try Premium features'
-        ]
-    },
-    {
-        type: '1_month',
-        name: 'Monthly Plan',
-        price: '₹15',
-        duration: '/30 days',
-        color: '#3B82F6',
-        features: [
-            'Ad-free experience',
-            'Priority routing',
-            'Save unlimited stations',
-            'Basic support'
-        ]
-    },
-    {
-        type: '6_month',
-        name: 'Half-Yearly Plan',
-        price: '₹79',
-        duration: '/180 days',
-        color: '#8B5CF6',
-        features: [
-            'Includes all Monthly features',
-            'Offline maps',
-            'Real-time fuel prices',
-            'Priority support',
-            'Best Value!'
-        ],
-        highlight: true
-    },
-    {
-        type: '1_year',
-        name: 'Annual Plan',
-        price: '₹150',
-        duration: '/365 days',
-        color: '#F59E0B',
-        features: [
-            'All features included',
-            'Business dashboard',
-            'Fleet management',
-            'Dedicated manager',
-            'Maximum Savings!'
-        ]
-    }
-];
+  {
+    type: 'free_trial',
+    name: 'Free Trial',
+    price: 0,
+    duration: '5 days',
+    accent: ['#0EA5E9', '#14B8A6'] as const,
+    badge: 'Explore',
+    highlight: false,
+    rewardText: 'No referral commission is triggered on trials',
+    features: [
+      'Experience premium navigation for 5 days',
+      'See cashback-inspired wallet previews',
+      'Evaluate upgrade intent before billing starts',
+    ],
+  },
+  {
+    type: 'monthly',
+    name: '30-Day Plan',
+    price: 15,
+    duration: '30 days',
+    accent: ['#4F46E5', '#06B6D4'] as const,
+    badge: 'Starter',
+    highlight: false,
+    rewardText: 'Triggers 20% commission after verified payment',
+    features: [
+      'Low-friction entry for referred users',
+      'Fastest path to referral conversion',
+      'Ideal for price-sensitive first purchases',
+    ],
+  },
+  {
+    type: 'quarterly',
+    name: '180-Day Plan',
+    price: 85,
+    duration: '180 days',
+    accent: ['#0F766E', '#10B981'] as const,
+    badge: 'Best Balance',
+    highlight: true,
+    rewardText: 'Higher LTV while staying conversion-friendly',
+    features: [
+      'Longer premium access for frequent drivers',
+      'Premium routing and wallet unlocks',
+      'Best mix of savings and subscription value',
+    ],
+  },
+  {
+    type: 'annual_premium',
+    name: '365-Day Plan',
+    price: 150,
+    duration: '365 days',
+    accent: ['#F59E0B', '#F97316'] as const,
+    badge: 'Power Plan',
+    highlight: false,
+    rewardText: 'Highest verified commission value per subscriber',
+    features: [
+      'Full-year premium access and savings',
+      'Lowest effective price per day',
+      'Designed for long-term subscriber loyalty',
+    ],
+  },
+] as const;
+
+const lightPalette = {
+  bg: '#EEF4FF',
+  surface: '#FFFFFF',
+  surfaceMuted: 'rgba(255, 255, 255, 0.78)',
+  text: '#0F172A',
+  textSoft: '#475569',
+  border: 'rgba(148, 163, 184, 0.24)',
+  hero: ['#0B1020', '#111C3E', '#163C76'] as const,
+  tint: '#6D5EF8',
+};
+
+const darkPalette = {
+  bg: '#040814',
+  surface: '#0D172B',
+  surfaceMuted: 'rgba(13, 23, 43, 0.84)',
+  text: '#F8FAFC',
+  textSoft: '#A5B4CC',
+  border: 'rgba(148, 163, 184, 0.18)',
+  hero: ['#040814', '#0B1735', '#123A7A'] as const,
+  tint: '#60A5FA',
+};
 
 export default function SubscriptionScreen() {
-    const navigation = useNavigation<any>();
-    const route = useRoute();
-    const { checkSubscription } = useAuth();
-    // @ts-ignore
-    const isMandatory = route.params?.isMandatory;
+  const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
+  const route = useRoute<RouteProp<AppStackParamList, 'Subscription'>>();
+  const { checkSubscription } = useAuth();
+  const colorScheme = useColorScheme();
+  const palette = colorScheme === 'dark' ? darkPalette : lightPalette;
+  const isMandatory = route.params?.isMandatory;
 
-    const [selectedPlan, setSelectedPlan] = useState('6_month');
-    const [loading, setLoading] = useState(false);
-    const [autoPay, setAutoPay] = useState(true);
+  const [selectedPlan, setSelectedPlan] = useState('quarterly');
+  const [loading, setLoading] = useState(false);
+  const [autoPay, setAutoPay] = useState(true);
 
-    const completeSubscription = async () => {
-        setLoading(true);
-        try {
-            const profile = await customerProfileApi.get();
-            if (profile?.user) {
-                await authStorage.saveUser(profile.user);
-            }
+  const currentPlan = PLAN_DATA.find((plan) => plan.type === selectedPlan) || PLAN_DATA[2];
 
-            Alert.alert('Success', 'Subscription activated successfully!');
+  const completeSubscription = async (message?: string) => {
+    setLoading(true);
+    try {
+      const profile = await customerProfileApi.get();
+      if (profile?.user) {
+        await authStorage.saveUser(profile.user);
+      }
 
-            // Always update global state so UI reflects premium status immediately
-            await checkSubscription();
+      await checkSubscription();
+      Alert.alert('Subscription Active', message || `${currentPlan.name} unlocked successfully.`);
 
-            if (isMandatory) {
-                // No need to do anything, App.tsx will re-render due to hasSubscription change? 
-                // Actually App.tsx logic: if hasSubscription becomes true, it renders Main. 
-                // So we might not even need navigation logic for mandatory, but keeping it safe.
-            } else {
-                navigation.goBack();
-            }
-        } catch (error) {
-            console.log("Profile refresh failed", error);
-        } finally {
-            setLoading(false);
-        }
-    };
+      if (!isMandatory) {
+        navigation.goBack();
+      }
+    } catch (_error) {
+      Alert.alert('Subscription Active', message || `${currentPlan.name} unlocked successfully.`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const handleSubscribe = async (planId: string) => {
-        const selectedPlanData = PLAN_DATA.find(p => p.type === planId);
-        if (!selectedPlanData) {
-            Alert.alert('Error', 'Plan not found');
-            return;
-        }
-
-        if (planId === 'free_trial') {
-            Alert.alert(
-                'Start Free Trial',
-                'Start your 15-day free trial now? No payment required.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Start Trial',
-                        style: 'default',
-                        onPress: () => processSubscription(planId)
-                    }
-                ]
-            );
-            return;
-        }
-
-        const numericPrice = parseInt(selectedPlanData.price.replace('₹', ''));
-        navigation.navigate('Payment', {
-            planId,
-            planName: selectedPlanData.name,
-            amountRupees: numericPrice,
-            color: selectedPlanData.color,
-            autoPay,
-        });
-    };
-
-    const processSubscription = async (planId: string) => {
-        setLoading(true);
-        try {
-            // Get Plan Price
-            const selectedPlanData = PLAN_DATA.find(p => p.type === planId);
-            if (!selectedPlanData) throw new Error("Plan not found");
-
-            // 1. Create Order (Skip for Free Trial)
-            let orderData = null;
-            if (planId !== 'free_trial') {
-                const numericPrice = parseInt(selectedPlanData.price.replace('₹', ''));
-                orderData = await customerProfileApi.createOrder({
-                    planId: planId,
-                    amount: numericPrice
-                });
-            } else {
-                // For free trial, directly activate without payment
+  const handleSubscribe = async () => {
+    if (selectedPlan === 'free_trial') {
+      Alert.alert(
+        'Start Free Trial',
+        'Trial access starts instantly for 5 days. Referral commission only begins when the first paid plan is verified.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Start Trial',
+            onPress: async () => {
+              setLoading(true);
+              try {
                 await customerProfileApi.subscribe({
-                    planType: planId,
-                    autoPay: autoPay  // Pass auto-pay preference for 1-month auto-renewal
+                  planType: selectedPlan,
+                  autoPay,
                 });
+                await completeSubscription(
+                  autoPay
+                    ? 'Free trial activated with 30-day auto-upgrade enabled.'
+                    : 'Free trial activated successfully.',
+                );
+              } catch (_error) {
+                Alert.alert('Error', 'Unable to start the free trial right now.');
+              } finally {
+                setLoading(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
 
-                // Refresh user profile
-                const profile = await customerProfileApi.get();
-                if (profile?.user) {
-                    await authStorage.saveUser(profile.user);
-                }
+    navigation.navigate('Payment', {
+      planId: currentPlan.type,
+      planName: currentPlan.name,
+      amountRupees: currentPlan.price,
+      color: currentPlan.accent[0],
+      autoPay,
+    });
+  };
 
-                const autoPayMessage = autoPay
-                    ? 'Free trial activated! Auto-subscribe to Monthly Plan (₹15) is enabled.'
-                    : 'Free trial activated successfully!';
-                Alert.alert('Success', autoPayMessage);
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
+      <LinearGradient colors={palette.hero} style={styles.heroShell}>
+        <View style={styles.header}>
+          {!isMandatory ? (
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.12)' }]}
+            >
+              <Ionicons name="arrow-back" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.iconSpacer} />
+          )}
+          <Text style={styles.headerTitle}>Premium Plans</Text>
+          <View style={styles.iconSpacer} />
+        </View>
 
-                if (isMandatory) {
-                    await checkSubscription(); // Refresh auth state to unlock App
-                } else {
-                    navigation.goBack();
-                }
-                return;
-            }
+        <View style={styles.heroContent}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroEyebrow}>Subscription Commission Engine</Text>
+            <Text style={styles.heroTitle}>Convert referrals into verified recurring revenue.</Text>
+            <Text style={styles.heroSubtitle}>
+              Referrers earn 20% only after the referred user completes their first paid subscription and payment verification succeeds.
+            </Text>
+          </View>
 
-
-
-            // ... inside processSubscription ...
-
-            // 2. Open Razorpay Checkout
-            if (planId !== 'free_trial' && orderData) {
-
-                // Debug Check
-                const RZNative = NativeModules.RNRazorpayCheckout || NativeModules.RazorpayCheckout;
-                if (!RZNative) {
-                    Alert.alert(
-                        'Expo Go Detected',
-                        'Razorpay cannot run in Expo Go. Switching to Simulation Mode.',
-                        [
-                            {
-                                text: 'Simulate Payment',
-                                onPress: async () => {
-                                    // Simulation Logic
-                                    setLoading(true);
-                                    try {
-                                        try {
-                                            await customerProfileApi.verifyPayment({
-                                                razorpay_order_id: orderData.orderId,
-                                                razorpay_payment_id: "pay_simulated_" + Date.now(),
-                                                razorpay_signature: "sim_sig",
-                                                planType: planId
-                                            });
-                                        } catch (e) {
-                                            console.log("Verify failed (expected), forcing subscribe...");
-                                            await customerProfileApi.subscribe({ planType: planId });
-                                        }
-                                        completeSubscription();
-                                    } catch (simError) {
-                                        Alert.alert('Simulation Error', 'Failed.');
-                                    } finally {
-                                        setLoading(false);
-                                    }
-                                }
-                            },
-                            { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) }
-                        ]
-                    );
-                    return;
-                }
-
-                const options = {
-                    description: `Subscription for ${selectedPlanData.name}`,
-                    image: 'https://cdn-icons-png.flaticon.com/512/2554/2554936.png',
-                    currency: 'INR',
-                    key: orderData.keyId,
-                    amount: orderData.amount, // Amount in paise
-                    name: 'CNG Bharat',
-                    order_id: orderData.orderId,
-                    prefill: {
-                        email: 'user@example.com',
-                        contact: '9999999999',
-                        name: 'Valued Customer'
-                    },
-                    theme: { color: selectedPlanData.color }
-                };
-
-                try {
-                    const data = await RazorpayCheckout.open(options);
-
-                    // On success:
-                    await customerProfileApi.verifyPayment({
-                        razorpay_order_id: data.razorpay_order_id,
-                        razorpay_payment_id: data.razorpay_payment_id,
-                        razorpay_signature: data.razorpay_signature,
-                        planType: planId
-                    });
-                } catch (paymentError: any) {
-                    console.log("Payment Error:", paymentError);
-
-                    if (paymentError.code === 0 || paymentError.code === 'PAYMENT_CANCELLED') {
-                        Alert.alert('Payment Cancelled', 'You cancelled the process.');
-                    } else {
-                        Alert.alert('Payment Failed', paymentError.description || paymentError.message || 'Unknown error');
-                    }
-                    setLoading(false);
-                    return;
-                }
-            }
-
-            completeSubscription();
-        } catch (error) {
-            console.error(error);
-            Alert.alert('Error', 'Failed to activate subscription. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                {!isMandatory && (
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={24} color="#1E293B" />
-                    </TouchableOpacity>
-                )}
-                <Text style={styles.headerTitle}>Premium Plans</Text>
-                <View style={{ width: 40 }} />
+          <View style={styles.heroStatsRow}>
+            <View style={styles.heroGlassCard}>
+              <Text style={styles.heroStatValue}>20%</Text>
+              <Text style={styles.heroStatLabel}>First plan commission</Text>
             </View>
+            <View style={styles.heroGlassCard}>
+              <Text style={styles.heroStatValue}>OTP</Text>
+              <Text style={styles.heroStatLabel}>Secure payout flow</Text>
+            </View>
+          </View>
+        </View>
+      </LinearGradient>
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                <View style={styles.introSection}>
-                    <Text style={styles.introTitle}>Upgrade Your Experience</Text>
-                    <Text style={styles.introSubtitle}>Choose a plan that fits your needs</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={[styles.infoCard, { backgroundColor: palette.surfaceMuted, borderColor: palette.border }]}>
+          <View style={styles.infoHeader}>
+            <View style={[styles.infoIcon, { backgroundColor: `${palette.tint}22` }]}>
+              <Ionicons name="sparkles" size={18} color={palette.tint} />
+            </View>
+            <Text style={[styles.infoTitle, { color: palette.text }]}>Commission policy</Text>
+          </View>
+          <Text style={[styles.infoBody, { color: palette.textSoft }]}>
+            No earnings on signup, free trials, fake accounts, or unpaid plans. Only the first successful paid subscription generates a referral commission.
+          </Text>
+        </View>
+
+        <View style={styles.planList}>
+          {PLAN_DATA.map((plan) => {
+            const selected = selectedPlan === plan.type;
+
+            return (
+              <TouchableOpacity
+                key={plan.type}
+                activeOpacity={0.92}
+                onPress={() => setSelectedPlan(plan.type)}
+                style={[
+                  styles.planCard,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: selected ? plan.accent[0] : palette.border,
+                  },
+                  selected && styles.planCardSelected,
+                ]}
+              >
+                <LinearGradient colors={plan.accent} style={styles.planTopBand}>
+                  <View>
+                    <Text style={styles.planBadge}>{plan.badge}</Text>
+                    <Text style={styles.planName}>{plan.name}</Text>
+                    <Text style={styles.planPrice}>₹{plan.price}</Text>
+                    <Text style={styles.planDuration}>{plan.duration}</Text>
+                  </View>
+                  <View style={[styles.selectionDot, selected && styles.selectionDotActive]}>
+                    {selected ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
+                  </View>
+                </LinearGradient>
+
+                <View style={styles.planBody}>
+                  {plan.highlight ? (
+                    <View style={styles.popularPill}>
+                      <Ionicons name="diamond" size={14} color="#0F172A" />
+                      <Text style={styles.popularPillText}>Most balanced for conversion</Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={[styles.rewardText, { color: palette.text }]}>
+                    {plan.rewardText}
+                  </Text>
+
+                  {plan.features.map((feature) => (
+                    <View key={feature} style={styles.featureRow}>
+                      <Ionicons name="checkmark-circle" size={18} color={plan.accent[0]} />
+                      <Text style={[styles.featureText, { color: palette.textSoft }]}>{feature}</Text>
+                    </View>
+                  ))}
                 </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-                <View style={styles.plansContainer}>
-                    {PLAN_DATA.map((plan) => (
-                        <TouchableOpacity
-                            key={plan.type}
-                            activeOpacity={0.9}
-                            onPress={() => setSelectedPlan(plan.type)}
-                            style={[
-                                styles.planCard,
-                                selectedPlan === plan.type && styles.selectedCard,
-                                { borderColor: selectedPlan === plan.type ? plan.color : '#E2E8F0' }
-                            ]}
-                        >
-                            {plan.highlight && (
-                                <View style={styles.popularBadge}>
-                                    <Text style={styles.popularText}>Most Popular</Text>
-                                </View>
-                            )}
+        <View style={[styles.infoCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+          <View style={styles.infoHeader}>
+            <View style={[styles.infoIcon, { backgroundColor: '#DCFCE7' }]}>
+              <Ionicons name="repeat" size={18} color="#16A34A" />
+            </View>
+            <Text style={[styles.infoTitle, { color: palette.text }]}>Auto-renewal</Text>
+          </View>
+          <View style={styles.switchRow}>
+            <View style={styles.switchCopy}>
+              <Text style={[styles.switchTitle, { color: palette.text }]}>
+                {selectedPlan === 'free_trial' ? 'Auto-upgrade to 30-Day Plan' : 'Keep subscription active'}
+              </Text>
+              <Text style={[styles.switchBody, { color: palette.textSoft }]}>
+                {selectedPlan === 'free_trial'
+                  ? 'Automatically move into the 30-Day plan when trial access ends.'
+                  : 'Reduce churn and keep premium access running without interruption.'}
+              </Text>
+            </View>
+            <Switch
+              value={autoPay}
+              onValueChange={setAutoPay}
+              trackColor={{ false: '#CBD5E1', true: '#86EFAC' }}
+              thumbColor={autoPay ? '#16A34A' : '#94A3B8'}
+            />
+          </View>
+        </View>
 
-                            <View style={[styles.planHeader, { backgroundColor: plan.color + '15' }]}>
-                                <View>
-                                    <Text style={[styles.planName, { color: plan.color }]}>{plan.name}</Text>
-                                    <View style={styles.priceContainer}>
-                                        <Text style={styles.price}>{plan.price}</Text>
-                                        <Text style={styles.duration}>{plan.duration}</Text>
-                                    </View>
-                                </View>
-                                <View style={[styles.checkCircle, { borderColor: plan.color, backgroundColor: selectedPlan === plan.type ? plan.color : 'transparent' }]}>
-                                    {selectedPlan === plan.type && <Ionicons name="checkmark" size={16} color="#FFF" />}
-                                </View>
-                            </View>
+        <View style={[styles.infoCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+          <View style={styles.infoHeader}>
+            <View style={[styles.infoIcon, { backgroundColor: '#DBEAFE' }]}>
+              <Ionicons name="shield-checkmark" size={18} color="#2563EB" />
+            </View>
+            <Text style={[styles.infoTitle, { color: palette.text }]}>Trust and verification</Text>
+          </View>
+          <Text style={[styles.infoBody, { color: palette.textSoft }]}>
+            Payment verification, duplicate-device checks, OTP-secured withdrawals, and suspicious-activity review are all applied before payouts are released.
+          </Text>
+        </View>
 
-                            <View style={styles.featuresList}>
-                                {plan.features.map((feature, index) => (
-                                    <View key={index} style={styles.featureItem}>
-                                        <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                                        <Text style={styles.featureText}>{feature}</Text>
-                                    </View>
-                                ))}
-                            </View>
-                        </TouchableOpacity>
-                    ))}
-                </View>
+        <TouchableOpacity activeOpacity={0.92} onPress={handleSubscribe} disabled={loading}>
+          <LinearGradient colors={currentPlan.accent} style={styles.ctaButton}>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Text style={styles.ctaText}>
+                  {currentPlan.type === 'free_trial'
+                    ? 'Start Free Trial'
+                    : `Activate ${currentPlan.name}`}
+                </Text>
+                <Ionicons name="arrow-forward" size={18} color="#fff" />
+              </>
+            )}
+          </LinearGradient>
+        </TouchableOpacity>
 
-                {/* Auto-Pay Option for Free Trial */}
-                {selectedPlan === 'free_trial' && (
-                    <View style={styles.autoPayContainer}>
-                        <View style={styles.autoPayLeft}>
-                            <View style={[styles.autoPayIconContainer, { backgroundColor: '#DBEAFE' }]}>
-                                <Ionicons name="card" size={20} color="#3B82F6" />
-                            </View>
-                            <View style={styles.autoPayTextContainer}>
-                                <Text style={styles.autoPayTitle}>Auto-Subscribe to Monthly</Text>
-                                <Text style={styles.autoPaySubtitle}>
-                                    Auto-subscribe to ₹15/month plan after trial ends
-                                </Text>
-                            </View>
-                        </View>
-                        <Switch
-                            value={autoPay}
-                            onValueChange={setAutoPay}
-                            trackColor={{ false: '#E2E8F0', true: '#93C5FD' }}
-                            thumbColor={autoPay ? '#3B82F6' : '#94A3B8'}
-                            ios_backgroundColor="#E2E8F0"
-                        />
-                    </View>
-                )}
-
-                {autoPay && selectedPlan === 'free_trial' && (
-                    <View style={[styles.autoPayInfoBox, { backgroundColor: '#EFF6FF' }]}>
-                        <Ionicons name="information-circle" size={18} color="#3B82F6" />
-                        <Text style={styles.autoPayInfoText}>
-                            After your 15-day free trial, you'll be automatically subscribed to the Monthly Plan (₹15/30 days). You can cancel anytime before trial ends.
-                        </Text>
-                    </View>
-                )}
-
-                {/* Auto-Pay Option for Paid Plans */}
-                {selectedPlan !== 'free_trial' && (
-                    <View style={styles.autoPayContainer}>
-                        <View style={styles.autoPayLeft}>
-                            <View style={styles.autoPayIconContainer}>
-                                <Ionicons name="repeat" size={20} color="#10B981" />
-                            </View>
-                            <View style={styles.autoPayTextContainer}>
-                                <Text style={styles.autoPayTitle}>Auto-Renewal</Text>
-                                <Text style={styles.autoPaySubtitle}>
-                                    Automatically renew when subscription expires
-                                </Text>
-                            </View>
-                        </View>
-                        <Switch
-                            value={autoPay}
-                            onValueChange={setAutoPay}
-                            trackColor={{ false: '#E2E8F0', true: '#86EFAC' }}
-                            thumbColor={autoPay ? '#10B981' : '#94A3B8'}
-                            ios_backgroundColor="#E2E8F0"
-                        />
-                    </View>
-                )}
-
-                {autoPay && selectedPlan !== 'free_trial' && (
-                    <View style={styles.autoPayInfoBox}>
-                        <Ionicons name="information-circle" size={18} color="#3B82F6" />
-                        <Text style={styles.autoPayInfoText}>
-                            You can cancel auto-renewal anytime from your profile settings. Your card will be charged automatically before expiry.
-                        </Text>
-                    </View>
-                )}
-
-                <View style={styles.actionContainer}>
-                    <TouchableOpacity
-                        style={[styles.subscribeButton, { backgroundColor: PLAN_DATA.find(p => p.type === selectedPlan)?.color || '#3B82F6' }]}
-                        onPress={() => handleSubscribe(selectedPlan)}
-                        disabled={loading}
-                    >
-                        {loading ? (
-                            <ActivityIndicator color="#fff" />
-                        ) : (
-                            <Text style={styles.subscribeText}>Get {PLAN_DATA.find(p => p.type === selectedPlan)?.name}</Text>
-                        )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={() => Linking.openURL('https://cngbharat.com/terms')}>
-                        <Text style={styles.termsText}>
-                            By subscribing, you agree to our{' '}
-                            <Text style={styles.termsLink}>Terms of Service</Text>
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-            </ScrollView>
-        </SafeAreaView >
-    );
+        <TouchableOpacity onPress={() => Linking.openURL('https://cngbharat.com/terms')}>
+          <Text style={[styles.termsText, { color: palette.textSoft }]}>
+            Subscription payment is processed securely. By continuing you agree to the{' '}
+            <Text style={styles.termsLink}>Terms of Service</Text>.
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#F8FAFC',
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingVertical: 15,
-        backgroundColor: '#FFF',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
-    },
-    backButton: {
-        padding: 8,
-        backgroundColor: '#F1F5F9',
-        borderRadius: 12,
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#0F172A',
-    },
-    scrollContent: {
-        padding: 20,
-        paddingBottom: 40,
-    },
-    introSection: {
-        marginBottom: 24,
-        alignItems: 'center',
-    },
-    introTitle: {
-        fontSize: 24,
-        fontWeight: '800',
-        color: '#1E293B',
-        marginBottom: 8,
-    },
-    introSubtitle: {
-        fontSize: 16,
-        color: '#64748B',
-    },
-    plansContainer: {
-        gap: 16,
-        marginBottom: 24,
-    },
-    planCard: {
-        backgroundColor: '#FFF',
-        borderRadius: 20,
-        borderWidth: 2,
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 12,
-        elevation: 3,
-        position: 'relative',
-    },
-    selectedCard: {
-        transform: [{ scale: 1.02 }],
-        shadowOpacity: 0.1,
-        elevation: 6,
-    },
-    popularBadge: {
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        backgroundColor: '#8B5CF6',
-        borderBottomLeftRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        zIndex: 10,
-    },
-    popularText: {
-        color: '#FFF',
-        fontSize: 10,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
-    planHeader: {
-        padding: 20,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-    },
-    planName: {
-        fontSize: 14,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-        marginBottom: 8,
-    },
-    priceContainer: {
-        flexDirection: 'row',
-        alignItems: 'baseline',
-    },
-    price: {
-        fontSize: 28,
-        fontWeight: '800',
-        color: '#1E293B',
-    },
-    duration: {
-        fontSize: 14,
-        color: '#64748B',
-        marginLeft: 4,
-    },
-    checkCircle: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        borderWidth: 2,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    featuresList: {
-        padding: 20,
-        paddingTop: 0,
-        gap: 12,
-    },
-    featureItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    featureText: {
-        fontSize: 14,
-        color: '#334155',
-    },
-    actionContainer: {
-        gap: 12,
-    },
-    subscribeButton: {
-        paddingVertical: 16,
-        borderRadius: 16,
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
-    },
-    subscribeText: {
-        color: '#FFF',
-        fontSize: 18,
-        fontWeight: '700',
-    },
-    termsText: {
-        textAlign: 'center',
-        fontSize: 12,
-        color: '#94A3B8',
-    },
-    termsLink: {
-        color: '#3B82F6',
-        fontWeight: '600',
-        textDecorationLine: 'underline',
-    },
-    autoPayContainer: {
-        backgroundColor: '#FFF',
-        borderRadius: 16,
-        padding: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    autoPayLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-    },
-    autoPayIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: '#ECFDF5',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-    },
-    autoPayTextContainer: {
-        flex: 1,
-    },
-    autoPayTitle: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: '#1E293B',
-        marginBottom: 2,
-    },
-    autoPaySubtitle: {
-        fontSize: 12,
-        color: '#64748B',
-    },
-    autoPayInfoBox: {
-        backgroundColor: '#EFF6FF',
-        borderRadius: 12,
-        padding: 12,
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 10,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: '#BFDBFE',
-    },
-    autoPayInfoText: {
-        flex: 1,
-        fontSize: 12,
-        color: '#3B82F6',
-        lineHeight: 18,
-    },
+  container: {
+    flex: 1,
+  },
+  heroShell: {
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingBottom: 26,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  iconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconSpacer: {
+    width: 38,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  heroContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    gap: 20,
+  },
+  heroCopy: {
+    gap: 10,
+  },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 34,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  heroStatsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  heroGlassCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 22,
+    padding: 16,
+  },
+  heroStatValue: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  heroStatLabel: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 36,
+    gap: 16,
+  },
+  infoCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 18,
+    gap: 10,
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  infoIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  infoBody: {
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  planList: {
+    gap: 16,
+  },
+  planCard: {
+    borderRadius: 28,
+    overflow: 'hidden',
+    borderWidth: 1,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  planCardSelected: {
+    transform: [{ scale: 1.01 }],
+  },
+  planTopBand: {
+    padding: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  planBadge: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  planName: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  planPrice: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '900',
+    marginTop: 12,
+  },
+  planDuration: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  selectionDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionDotActive: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  planBody: {
+    padding: 20,
+    gap: 12,
+  },
+  popularPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FDE68A',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  popularPillText: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  rewardText: {
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 22,
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  featureText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  switchCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  switchTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  switchBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  ctaButton: {
+    borderRadius: 22,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  ctaText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  termsText: {
+    marginTop: 4,
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  termsLink: {
+    color: '#2563EB',
+    fontWeight: '700',
+  },
 });

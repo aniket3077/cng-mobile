@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,37 +10,48 @@ import {
 } from 'react-native';
 import RazorpayCheckout from 'react-native-razorpay';
 import { customerProfileApi } from '../lib/api';
+import { authStorage } from '../lib/auth';
+import { featureFlags } from '../lib/featureFlags';
 import { useAuth } from '../lib/authContext';
+import { AppScreenProps } from '../types/navigation';
 
-interface Props {
-  navigation: any;
-  route: any;
-}
+type Props = AppScreenProps<'Payment'>;
 
 export default function PaymentScreen({ navigation, route }: Props) {
-  const { checkSubscription } = useAuth();
-  const planId = route?.params?.planId || '1_month';
-  const planName = route?.params?.planName || 'Monthly Plan';
+  const { isAuthenticated, checkSubscription } = useAuth();
+  const planId = route?.params?.planId ?? '1_month';
+  const planName = route?.params?.planName ?? 'Monthly Plan';
   const amountRupees = route?.params?.amountRupees ?? 15;
-  const color = route?.params?.color || '#3B82F6';
+  const color = route?.params?.color ?? '#3B82F6';
   const autoPay = route?.params?.autoPay ?? true;
 
   const [selectedMethod, setSelectedMethod] = useState<'upi' | 'card'>('upi');
   const [loading, setLoading] = useState(false);
 
-  const finalizeSubscription = async () => {
+  // Independent auth guard: even if navigated to directly, reject unauthenticated users.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      Alert.alert('Sign In Required', 'Please sign in to continue with payment.');
+      navigation.replace('Login' as any);
+    }
+  }, [isAuthenticated, navigation]);
+
+  const finalizeSubscription = async (message?: string) => {
     await checkSubscription();
-    Alert.alert('Success', `${planName} activated successfully!`);
+    Alert.alert('Success', message || `${planName} activated successfully!`);
     navigation.goBack();
   };
 
   const handleContinue = async () => {
-    setLoading(true);
+    if (!isAuthenticated) {
+      Alert.alert('Sign In Required', 'Please sign in to continue.');
+      return;
+    }
 
+    setLoading(true);
     try {
       const orderResponse = await customerProfileApi.createOrder({
         planId,
-        amount: amountRupees,
       });
 
       if (!orderResponse?.success) {
@@ -49,32 +60,48 @@ export default function PaymentScreen({ navigation, route }: Props) {
       }
 
       const RZNative = NativeModules.RNRazorpayCheckout || NativeModules.RazorpayCheckout;
+
       if (!RZNative) {
-        Alert.alert(
-          'Simulation Mode',
-          `${selectedMethod === 'upi' ? 'UPI' : 'Card'} flow is not available in Expo Go. Simulate payment?`,
-          [
-            {
-              text: 'Simulate',
-              onPress: async () => {
-                try {
-                  await customerProfileApi.verifyPayment({
-                    razorpay_order_id: orderResponse.orderId,
-                    razorpay_payment_id: `pay_simulated_${Date.now()}`,
-                    razorpay_signature: 'sim_sig',
-                    planType: planId,
-                  });
-                } catch (_error) {
-                  await customerProfileApi.subscribe({ planType: planId, autoPay });
-                }
-                await finalizeSubscription();
+        // DEV-ONLY simulation: ONLY available when __DEV__ is true AND the flag is explicitly opt-in.
+        // This entire branch is excluded from production builds because __DEV__ is false.
+        if (__DEV__ && featureFlags.enableDevPaymentSimulation) {
+          Alert.alert(
+            '[DEV] Simulate Payment',
+            `Razorpay native module not found. Simulate ${selectedMethod === 'upi' ? 'UPI' : 'Card'} payment?`,
+            [
+              {
+                text: 'Simulate',
+                onPress: async () => {
+                  try {
+                    const verifyResponse = await customerProfileApi.verifyPayment({
+                      razorpay_order_id: orderResponse.orderId,
+                      razorpay_payment_id: `pay_dev_sim_${Date.now()}`,
+                      razorpay_signature: `dev_sig_${Date.now()}`,
+                      planType: planId,
+                    });
+                    await finalizeSubscription(
+                      verifyResponse?.commission?.reason ?? `${planName} activated (dev sim).`,
+                    );
+                  } catch {
+                    Alert.alert('[DEV] Simulation Failed', 'Backend rejected dev payment. Enable EXPO_PUBLIC_ENABLE_DEV_PAYMENT_SIMULATION.');
+                  }
+                },
               },
-            },
-            { text: 'Cancel', style: 'cancel' },
-          ]
-        );
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          );
+        } else {
+          // Production: native Razorpay module unavailable — do not offer any bypass.
+          Alert.alert(
+            'Payment Unavailable',
+            'Payment is not available in this environment. Please use the published app to subscribe.'
+          );
+        }
         return;
       }
+
+      // Fetch real user profile data for Razorpay prefill so receipts are accurate.
+      const user = await authStorage.getUser();
 
       const options = {
         description: `${planName} via ${selectedMethod === 'upi' ? 'UPI' : 'Card'}`,
@@ -85,35 +112,41 @@ export default function PaymentScreen({ navigation, route }: Props) {
         name: 'CNG Bharat',
         order_id: orderResponse.orderId,
         prefill: {
-          email: 'user@example.com',
-          contact: '9999999999',
-          name: 'Valued Customer',
+          email: user?.email ?? '',
+          contact: user?.phone ?? '',
+          name: user?.name ?? '',
         },
         theme: { color },
       };
 
       try {
         const data = await RazorpayCheckout.open(options);
-        await customerProfileApi.verifyPayment({
+        const verifyResponse = await customerProfileApi.verifyPayment({
           razorpay_order_id: data.razorpay_order_id,
           razorpay_payment_id: data.razorpay_payment_id,
           razorpay_signature: data.razorpay_signature,
           planType: planId,
         });
-        await finalizeSubscription();
+        await finalizeSubscription(
+          verifyResponse?.commission?.reason ?? `${planName} activated successfully!`,
+        );
       } catch (paymentError: any) {
         if (paymentError?.code === 0 || paymentError?.code === 'PAYMENT_CANCELLED') {
           Alert.alert('Payment Cancelled', 'You cancelled the process.');
         } else {
-          Alert.alert('Payment Failed', paymentError?.description || paymentError?.message || 'Unknown error');
+          Alert.alert('Payment Failed', paymentError?.description ?? paymentError?.message ?? 'Unknown error');
         }
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Unable to initialize payment. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
     <View style={styles.container}>
@@ -127,10 +160,7 @@ export default function PaymentScreen({ navigation, route }: Props) {
         </View>
 
         <TouchableOpacity
-          style={[
-            styles.methodCard,
-            selectedMethod === 'upi' && styles.selectedMethodCard,
-          ]}
+          style={[styles.methodCard, selectedMethod === 'upi' && styles.selectedMethodCard]}
           activeOpacity={0.9}
           onPress={() => setSelectedMethod('upi')}
         >
@@ -142,10 +172,7 @@ export default function PaymentScreen({ navigation, route }: Props) {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
-            styles.methodCard,
-            selectedMethod === 'card' && styles.selectedMethodCard,
-          ]}
+          style={[styles.methodCard, selectedMethod === 'card' && styles.selectedMethodCard]}
           activeOpacity={0.9}
           onPress={() => setSelectedMethod('card')}
         >

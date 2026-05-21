@@ -1,719 +1,1638 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Share,
-  Alert,
-  TextInput,
   ActivityIndicator,
+  Alert,
+  Animated,
   Modal,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useColorScheme,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { referralApi, payoutApi } from '../lib/api';
+import { authenticateSensitiveAction } from '../lib/biometrics';
+import { getDeviceFingerprint } from '../lib/deviceFingerprint';
+import { maskPayoutDestination } from '../lib/security';
+import { AppScreenProps } from '../types/navigation';
 
-interface ReferralStats {
-  totalReferrals: number;
-  completedReferrals: number;
-  totalEarnings: number;
-  availableBalance: number;
-  pendingEarnings: number;
-  referralCode: string;
-  referralLink: string;
+interface MonthlyPoint {
+  label: string;
+  amount: number;
 }
 
-interface WithdrawalData {
-  amount: string;
-  payoutMethod: 'bank_transfer' | 'upi';
-  accountDetails: {
-    accountNumber: string;
-    ifsc: string;
-    accountHolderName: string;
-    upiId?: string;
+interface SavedMethod {
+  id: string;
+  type: 'upi' | 'bank_transfer';
+  label: string;
+  isDefault: boolean;
+  upiId?: string | null;
+  accountNumberMasked?: string | null;
+  accountHolderName?: string | null;
+  ifsc?: string | null;
+}
+
+interface ReferralHistoryItem {
+  id: string;
+  referredUserName: string;
+  subscriptionPlan?: string | null;
+  subscriptionAmount: number;
+  commissionEarned: number;
+  paymentStatus: string;
+  referralStatus: string;
+  subscriptionDate: string;
+  suspicious: boolean;
+  eligibleForCommission: boolean;
+  ineligibleReason?: string | null;
+}
+
+interface CommissionHistoryItem {
+  id: string;
+  referredUserName: string;
+  subscriptionPlan?: string | null;
+  sourceAmount: number;
+  commissionAmount: number;
+  remainingAmount: number;
+  status: string;
+  earnedAt: string;
+  description?: string | null;
+}
+
+interface SubscriptionPlanPreview {
+  id: string;
+  name: string;
+  price: number;
+  duration: number;
+  billingLabel: string;
+  cashbackHighlight: string;
+  commissionEligible: boolean;
+}
+
+interface ReferralDashboard {
+  share: {
+    referralCode: string;
+    referralLink: string;
+    deepLink: string;
+    inviteMessage: string;
+  };
+  overview: {
+    totalReferralCommissionEarned: number;
+    activeSubscribedReferrals: number;
+    pendingCommissions: number;
+    withdrawableBalance: number;
+    paidOutCommissions: number;
+    totalReferrals: number;
+    conversionRate: number;
+    monthlyGraph: MonthlyPoint[];
+  };
+  wallet: {
+    availableBalance: number;
+    minimumWithdrawal: number;
+    maximumWithdrawal: number;
+    instantPayoutEnabled: boolean;
+    otpRequired: boolean;
+    payoutRail: string;
+    savedMethods: SavedMethod[];
+  };
+  referralHistory: ReferralHistoryItem[];
+  commissionHistory: CommissionHistoryItem[];
+  payoutHistoryPreview: Array<{
+    id: string;
+    amount: number;
+    netAmount: number;
+    feeAmount: number;
+    status: string;
+    referenceId?: string | null;
+    createdAt: string;
+  }>;
+  subscriptionPlans: SubscriptionPlanPreview[];
+  fraudSignals: {
+    status: string;
+    score: number;
+    monitor: string[];
   };
 }
 
-interface BankTransferDetails {
-  accountNumber: string;
-  ifsc: string;
-  accountHolderName: string;
+type HistoryFilter = 'all' | 'paid' | 'pending' | 'blocked';
+
+const lightPalette = {
+  bg: '#EEF4FF',
+  card: '#FFFFFF',
+  mutedCard: 'rgba(255,255,255,0.78)',
+  text: '#0F172A',
+  textSoft: '#475569',
+  border: 'rgba(148,163,184,0.22)',
+  hero: ['#050816', '#101C3C', '#173D78'] as const,
+};
+
+const darkPalette = {
+  bg: '#030712',
+  card: '#0B1326',
+  mutedCard: 'rgba(11,19,38,0.84)',
+  text: '#F8FAFC',
+  textSoft: '#9FB0CB',
+  border: 'rgba(148,163,184,0.16)',
+  hero: ['#020617', '#07142C', '#123B7A'] as const,
+};
+
+const historyFilters: HistoryFilter[] = ['all', 'paid', 'pending', 'blocked'];
+
+function formatCurrency(amount: number) {
+  return `₹${Math.round(amount).toLocaleString('en-IN')}`;
 }
 
-interface UPIDetails {
-  upiId: string;
+function formatPlanLabel(plan?: string | null) {
+  if (!plan) {
+    return 'Awaiting first paid plan';
+  }
+
+  const knownPlans: Record<string, string> = {
+    free_trial: '5-Day Free Trial',
+    monthly: '30-Day Plan',
+    quarterly: '180-Day Plan',
+    annual_premium: '365-Day Plan',
+  };
+
+  return knownPlans[plan] || plan
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (value) => value.toUpperCase());
 }
 
-interface ReferralData {
-  stats: ReferralStats;
-  referrals: any[];
-  earnings: any[];
-  payoutRequests: any[];
-  availableBalance: number;
-  totalEarnings: number;
-  pendingEarnings: number;
-  referralCode: string;
-  referralLink: string;
+function getStatusMeta(status: string) {
+  switch (status) {
+    case 'available':
+    case 'paid':
+    case 'completed':
+      return { bg: '#DCFCE7', text: '#166534', label: 'Verified' };
+    case 'pending':
+    case 'processing':
+      return { bg: '#FEF3C7', text: '#92400E', label: 'Pending' };
+    case 'failed':
+    case 'blocked':
+    case 'expired':
+      return { bg: '#FEE2E2', text: '#991B1B', label: 'Blocked' };
+    default:
+      return { bg: '#DBEAFE', text: '#1D4ED8', label: status };
+  }
 }
 
-export default function ReferralScreen() {
-  const [referralData, setReferralData] = useState<ReferralData | null>(null);
+type Props = AppScreenProps<'Referral'>;
+
+export default function ReferralScreen({ navigation }: Props) {
+  const colorScheme = useColorScheme();
+  const palette = colorScheme === 'dark' ? darkPalette : lightPalette;
+  const [dashboard, setDashboard] = useState<ReferralDashboard | null>(null);
   const [loading, setLoading] = useState(true);
-  const [referralCode, setReferralCode] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [applyingCode, setApplyingCode] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawMethod, setWithdrawMethod] = useState<'bank_transfer' | 'upi'>('bank_transfer');
-  const [processingWithdraw, setProcessingWithdraw] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<HistoryFilter>('all');
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [withdrawForm, setWithdrawForm] = useState({
+    amount: '',
+    payoutMethod: 'upi' as 'upi' | 'bank_transfer',
+    payoutMethodId: '',
+    instantPayout: true,
+    otpCode: '',
+    upiId: '',
+    accountNumber: '',
+    ifsc: '',
+    accountHolderName: '',
+  });
+  const [submittingPayout, setSubmittingPayout] = useState(false);
+
+  const orbOne = useRef(new Animated.Value(0)).current;
+  const orbTwo = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadReferralData();
+
+    const animationOne = Animated.loop(
+      Animated.sequence([
+        Animated.timing(orbOne, {
+          toValue: 1,
+          duration: 2800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(orbOne, {
+          toValue: 0,
+          duration: 2800,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    const animationTwo = Animated.loop(
+      Animated.sequence([
+        Animated.timing(orbTwo, {
+          toValue: 1,
+          duration: 3600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(orbTwo, {
+          toValue: 0,
+          duration: 3600,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animationOne.start();
+    animationTwo.start();
+
+    return () => {
+      animationOne.stop();
+      animationTwo.stop();
+    };
   }, []);
 
-  const loadReferralData = async () => {
+  const loadReferralData = async (mode: 'initial' | 'refresh' = 'initial') => {
+    if (mode === 'refresh') {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
-      const data = await referralApi.getReferralInfo();
-      setReferralData(data);
-    } catch (error) {
-      console.error('Failed to load referral data:', error);
-      Alert.alert('Error', 'Failed to load referral information');
+      const response = await referralApi.getReferralInfo();
+      setDashboard(response);
+    } catch (_error) {
+      Alert.alert('Unable to load', 'Referral commission data could not be fetched right now.');
     } finally {
-      setLoading(false);
+      if (mode === 'refresh') {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
-  const shareReferralCode = async () => {
-    if (!referralData?.stats.referralCode) return;
+  const filteredHistory = dashboard
+    ? dashboard.referralHistory.filter((item) => {
+        if (selectedFilter === 'all') {
+          return true;
+        }
+        if (selectedFilter === 'paid') {
+          return item.paymentStatus === 'paid' && item.referralStatus === 'completed';
+        }
+        if (selectedFilter === 'pending') {
+          return item.paymentStatus !== 'paid' && item.eligibleForCommission;
+        }
+
+        return !item.eligibleForCommission || item.referralStatus === 'expired';
+      })
+    : [];
+
+  const maxGraphValue = Math.max(
+    1,
+    ...(dashboard?.overview.monthlyGraph.map((point) => point.amount) || [0]),
+  );
+
+  const handleShare = async () => {
+    if (!dashboard) {
+      return;
+    }
 
     try {
-      const result = await Share.share({
-        message: `Join CNG Bharat using my referral code: ${referralData.stats.referralCode}\n\nDownload the app: ${referralData.stats.referralLink}`,
-        title: 'Invite to CNG Bharat',
+      await Share.share({
+        title: 'Refer subscribers and earn',
+        message: `${dashboard.share.inviteMessage}\n\n${dashboard.share.referralLink}`,
       });
-
-      if (result.action === Share.sharedAction) {
-        console.log('Referral code shared successfully');
-      }
-    } catch (error) {
-      console.error('Error sharing referral code:', error);
-      Alert.alert('Error', 'Failed to share referral code');
+    } catch (_error) {
+      Alert.alert('Share unavailable', 'The share sheet could not be opened.');
     }
-  };
-
-  const copyReferralCode = () => {
-    if (!referralData?.stats.referralCode) return;
-    Alert.alert('Success', 'Referral code copied to clipboard!');
   };
 
   const handleApplyCode = async () => {
-    if (!referralCode.trim()) {
-      Alert.alert('Error', 'Please enter a referral code');
+    if (!referralCodeInput.trim()) {
+      Alert.alert('Referral code required', 'Enter a referral code to link your first paid subscription.');
       return;
     }
 
     setApplyingCode(true);
     try {
-      const response = await referralApi.applyReferralCode(referralCode.trim());
-      if (response.success) {
-        Alert.alert('Success', 'Referral code applied successfully!');
-        await loadReferralData();
-      } else {
-        Alert.alert('Error', response.message || 'Failed to apply referral code');
-      }
-    } catch (error) {
-      console.error('Error applying referral code:', error);
-      Alert.alert('Error', 'Failed to apply referral code');
+      const deviceFingerprint = await getDeviceFingerprint();
+      const response = await referralApi.applyReferralCode({
+        referralCode: referralCodeInput.trim().toUpperCase(),
+        deviceFingerprint,
+        referralSource: 'wallet_manual_entry',
+      });
+      Alert.alert('Referral linked', response.message || 'Your referral has been recorded.');
+      setReferralCodeInput('');
+      await loadReferralData('refresh');
+    } catch (error: any) {
+      Alert.alert('Unable to link code', error.response?.data?.error || 'Please try again.');
     } finally {
       setApplyingCode(false);
     }
   };
 
-  const handleWithdraw = async () => {
-    if (!withdrawAmount.trim() || parseFloat(withdrawAmount) < 100) {
-      Alert.alert('Error', 'Please enter a valid amount (Min: ₹100)');
+  const resetWithdrawForm = () => {
+    setWithdrawForm({
+      amount: '',
+      payoutMethod: 'upi',
+      payoutMethodId: '',
+      instantPayout: true,
+      otpCode: '',
+      upiId: '',
+      accountNumber: '',
+      ifsc: '',
+      accountHolderName: '',
+    });
+  };
+
+  const handleSubmitWithdrawal = async () => {
+    if (!dashboard) {
       return;
     }
 
-    if (referralData?.availableBalance && parseFloat(withdrawAmount) > referralData.availableBalance) {
-      Alert.alert('Error', 'Insufficient balance');
+    const amount = Number(withdrawForm.amount);
+    if (!amount || Number.isNaN(amount)) {
+      Alert.alert('Amount required', 'Enter a valid withdrawal amount.');
       return;
     }
 
-    setProcessingWithdraw(true);
+    if (amount < dashboard.wallet.minimumWithdrawal || amount > dashboard.wallet.maximumWithdrawal) {
+      Alert.alert(
+        'Amount out of range',
+        `Withdrawals must be between ${formatCurrency(dashboard.wallet.minimumWithdrawal)} and ${formatCurrency(dashboard.wallet.maximumWithdrawal)}.`,
+      );
+      return;
+    }
+
+    if (amount > dashboard.wallet.availableBalance) {
+      Alert.alert('Insufficient balance', 'Your withdrawable balance is lower than this request.');
+      return;
+    }
+
+    if (withdrawForm.otpCode.trim().length !== 6) {
+      Alert.alert('OTP required', 'Enter the 6-digit payout verification OTP.');
+      return;
+    }
+
+    if (!withdrawForm.payoutMethodId) {
+      if (withdrawForm.payoutMethod === 'upi' && !withdrawForm.upiId.trim()) {
+        Alert.alert('UPI required', 'Enter a valid UPI ID to continue.');
+        return;
+      }
+
+      if (
+        withdrawForm.payoutMethod === 'bank_transfer' &&
+        (!withdrawForm.accountNumber.trim() || !withdrawForm.ifsc.trim() || !withdrawForm.accountHolderName.trim())
+      ) {
+        Alert.alert('Bank details required', 'Complete the account details to continue.');
+        return;
+      }
+    }
+
+    setSubmittingPayout(true);
     try {
-      let accountDetails: BankTransferDetails | UPIDetails;
-      
-      if (withdrawMethod === 'bank_transfer') {
-        accountDetails = {
-          accountNumber: '1234567890', // User should fill these
-          ifsc: 'HDFC0001234',
-          accountHolderName: 'John Doe',
-        };
-      } else {
-        accountDetails = {
-          upiId: 'user@upi', // User should fill this
-        };
+      const biometricResult = await authenticateSensitiveAction('Confirm withdrawal');
+      if (!biometricResult.success) {
+        setSubmittingPayout(false);
+        Alert.alert('Authentication Required', biometricResult.message);
+        return;
       }
 
       const response = await payoutApi.requestPayout({
-        amount: parseFloat(withdrawAmount),
-        payoutMethod: withdrawMethod,
-        accountDetails: accountDetails as any,
+        amount,
+        payoutMethod: withdrawForm.payoutMethod,
+        payoutMethodId: withdrawForm.payoutMethodId || undefined,
+        instantPayout: withdrawForm.instantPayout,
+        otpCode: withdrawForm.otpCode,
+        accountDetails: withdrawForm.payoutMethodId
+          ? undefined
+          : {
+              accountNumber: withdrawForm.accountNumber,
+              ifsc: withdrawForm.ifsc,
+              accountHolderName: withdrawForm.accountHolderName,
+              upiId: withdrawForm.upiId || undefined,
+            },
       });
 
-      if (response.success) {
-        Alert.alert('Success', 'Withdrawal request submitted successfully!');
-        await loadReferralData(); // Refresh balance
-        setShowWithdrawModal(false);
-        setWithdrawAmount('');
-      } else {
-        Alert.alert('Error', response.message || 'Failed to submit withdrawal request');
-      }
-    } catch (error) {
-      console.error('Error requesting withdrawal:', error);
-      Alert.alert('Error', 'Failed to request withdrawal');
+      Alert.alert(
+        'Withdrawal queued',
+        response.payoutRequest?.statusMessage || 'Your payout request has been submitted.',
+      );
+      setShowWithdrawModal(false);
+      resetWithdrawForm();
+      await loadReferralData('refresh');
+    } catch (error: any) {
+      Alert.alert('Withdrawal failed', error.response?.data?.error || 'Please try again.');
     } finally {
-      setProcessingWithdraw(false);
+      setSubmittingPayout(false);
     }
   };
 
+  const selectedMethod = dashboard?.wallet.savedMethods.find(
+    (method) => method.id === withdrawForm.payoutMethodId,
+  );
+  const payoutFeePreview = withdrawForm.instantPayout
+    ? Math.min((Number(withdrawForm.amount) || 0) * 0.015, 25)
+    : 0;
+  const netPreview = Math.max((Number(withdrawForm.amount) || 0) - payoutFeePreview, 0);
+  const otpDestination = maskPayoutDestination(
+    selectedMethod?.upiId ||
+      selectedMethod?.accountNumberMasked ||
+      withdrawForm.upiId ||
+      withdrawForm.accountNumber,
+  );
+
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#0EA5E9" />
-        <Text style={styles.loadingText}>Loading referral data...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: palette.bg }]}>
+        <ActivityIndicator size="large" color="#60A5FA" />
+        <Text style={[styles.loadingText, { color: palette.textSoft }]}>Preparing your commission dashboard…</Text>
       </View>
     );
   }
 
-  return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Referral Program</Text>
-        <Text style={styles.subtitle}>Invite friends and earn rewards</Text>
-      </View>
+  if (!dashboard) {
+    return (
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: palette.bg }]}>
+        <TouchableOpacity onPress={() => loadReferralData()} style={styles.retryButton}>
+          <Text style={styles.retryText}>Retry loading dashboard</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
-      {/* Withdrawal Modal */}
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
       <Modal
         visible={showWithdrawModal}
-        transparent={true}
         animationType="slide"
+        transparent
         onRequestClose={() => setShowWithdrawModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalCard, { backgroundColor: palette.card }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Withdraw Earnings</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowWithdrawModal(false)}
-              >
-                <Text style={styles.closeButtonText}>×</Text>
+              <View>
+                <Text style={[styles.modalTitle, { color: palette.text }]}>Secure withdrawal</Text>
+                <Text style={[styles.modalSubtitle, { color: palette.textSoft }]}>
+                  OTP verification and payout checks run before release.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowWithdrawModal(false)} style={styles.closeButton}>
+                <Ionicons name="close" size={20} color={palette.text} />
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalBody}>
-              <Text style={styles.modalDescription}>
-                Enter amount to withdraw from your available balance
-              </Text>
-              <Text style={styles.balanceInfo}>
-                Available: ₹{referralData?.availableBalance || 0}
-              </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                <Text style={[styles.inputLabel, { color: palette.text }]}>Amount</Text>
+                <TextInput
+                  value={withdrawForm.amount}
+                  onChangeText={(value) => setWithdrawForm((current) => ({ ...current, amount: value.replace(/[^0-9.]/g, '') }))}
+                  placeholder="Enter amount"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  style={[styles.input, { color: palette.text }]}
+                />
+                <Text style={[styles.helperText, { color: palette.textSoft }]}>
+                  Available {formatCurrency(dashboard.wallet.availableBalance)} • Fee preview {formatCurrency(payoutFeePreview)} • Net {formatCurrency(netPreview)}
+                </Text>
+              </View>
 
-              <View style={styles.methodSelector}>
+              {dashboard.wallet.savedMethods.length > 0 ? (
+                <View style={styles.savedMethodSection}>
+                  <Text style={[styles.sectionTitle, { color: palette.text }]}>Saved payout methods</Text>
+                  {dashboard.wallet.savedMethods.map((method) => {
+                    const isSelected = withdrawForm.payoutMethodId === method.id;
+                    return (
+                      <TouchableOpacity
+                        key={method.id}
+                        onPress={() =>
+                          setWithdrawForm((current) => ({
+                            ...current,
+                            payoutMethodId: isSelected ? '' : method.id,
+                            payoutMethod: method.type,
+                          }))
+                        }
+                        style={[
+                          styles.savedMethodCard,
+                          {
+                            backgroundColor: isSelected ? 'rgba(96,165,250,0.14)' : palette.mutedCard,
+                            borderColor: isSelected ? '#60A5FA' : palette.border,
+                          },
+                        ]}
+                      >
+                        <View style={styles.savedMethodCopy}>
+                          <Text style={[styles.savedMethodTitle, { color: palette.text }]}>{method.label}</Text>
+                          <Text style={[styles.savedMethodBody, { color: palette.textSoft }]}>
+                            {method.type === 'upi'
+                              ? method.upiId
+                              : `${method.accountNumberMasked || ''} ${method.ifsc || ''}`.trim()}
+                          </Text>
+                        </View>
+                        {method.isDefault ? <Text style={styles.defaultChip}>Default</Text> : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              <View style={styles.toggleRow}>
                 <TouchableOpacity
                   style={[
-                    styles.methodOption,
-                    withdrawMethod === 'bank_transfer' && styles.selectedMethod,
+                    styles.togglePill,
+                    withdrawForm.payoutMethod === 'upi' && styles.togglePillActive,
                   ]}
-                  onPress={() => setWithdrawMethod('bank_transfer')}
+                  onPress={() => setWithdrawForm((current) => ({ ...current, payoutMethod: 'upi', payoutMethodId: '' }))}
                 >
-                  <Text style={[
-                    styles.methodText,
-                    withdrawMethod === 'bank_transfer' && styles.selectedMethodText,
-                  ]}>
-                    Bank Transfer
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.methodOption,
-                    withdrawMethod === 'upi' && styles.selectedMethod,
-                  ]}
-                  onPress={() => setWithdrawMethod('upi')}
-                >
-                  <Text style={[
-                    styles.methodText,
-                    withdrawMethod === 'upi' && styles.selectedMethodText,
-                  ]}>
+                  <Text
+                    style={[
+                      styles.toggleText,
+                      withdrawForm.payoutMethod === 'upi' && styles.toggleTextActive,
+                    ]}
+                  >
                     UPI
                   </Text>
                 </TouchableOpacity>
-              </View>
-
-              <TextInput
-                style={styles.withdrawInput}
-                placeholder="Enter amount"
-                value={withdrawAmount}
-                onChangeText={setWithdrawAmount}
-                keyboardType="numeric"
-                maxLength={8}
-              />
-
-              <View style={styles.withdrawActions}>
                 <TouchableOpacity
-                  style={styles.withdrawButton}
-                  onPress={handleWithdraw}
-                  disabled={processingWithdraw || !withdrawAmount.trim()}
+                  style={[
+                    styles.togglePill,
+                    withdrawForm.payoutMethod === 'bank_transfer' && styles.togglePillActive,
+                  ]}
+                  onPress={() =>
+                    setWithdrawForm((current) => ({
+                      ...current,
+                      payoutMethod: 'bank_transfer',
+                      payoutMethodId: '',
+                    }))
+                  }
                 >
-                  {processingWithdraw ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.withdrawButtonText}>Withdraw Now</Text>
-                  )}
+                  <Text
+                    style={[
+                      styles.toggleText,
+                      withdrawForm.payoutMethod === 'bank_transfer' && styles.toggleTextActive,
+                    ]}
+                  >
+                    Bank
+                  </Text>
                 </TouchableOpacity>
               </View>
-            </View>
+
+              {!selectedMethod ? (
+                <View style={styles.manualMethodFields}>
+                  {withdrawForm.payoutMethod === 'upi' ? (
+                    <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                      <Text style={[styles.inputLabel, { color: palette.text }]}>UPI ID</Text>
+                      <TextInput
+                        value={withdrawForm.upiId}
+                        onChangeText={(value) => setWithdrawForm((current) => ({ ...current, upiId: value }))}
+                        placeholder="yourname@bank"
+                        placeholderTextColor="#94A3B8"
+                        autoCapitalize="none"
+                        style={[styles.input, { color: palette.text }]}
+                      />
+                    </View>
+                  ) : (
+                    <>
+                      <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                        <Text style={[styles.inputLabel, { color: palette.text }]}>Account holder name</Text>
+                        <TextInput
+                          value={withdrawForm.accountHolderName}
+                          onChangeText={(value) => setWithdrawForm((current) => ({ ...current, accountHolderName: value }))}
+                          placeholder="Enter account holder name"
+                          placeholderTextColor="#94A3B8"
+                          style={[styles.input, { color: palette.text }]}
+                        />
+                      </View>
+                      <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                        <Text style={[styles.inputLabel, { color: palette.text }]}>Account number</Text>
+                        <TextInput
+                          value={withdrawForm.accountNumber}
+                          onChangeText={(value) => setWithdrawForm((current) => ({ ...current, accountNumber: value.replace(/[^0-9]/g, '') }))}
+                          placeholder="Enter account number"
+                          placeholderTextColor="#94A3B8"
+                          keyboardType="numeric"
+                          style={[styles.input, { color: palette.text }]}
+                        />
+                      </View>
+                      <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                        <Text style={[styles.inputLabel, { color: palette.text }]}>IFSC</Text>
+                        <TextInput
+                          value={withdrawForm.ifsc}
+                          onChangeText={(value) => setWithdrawForm((current) => ({ ...current, ifsc: value.toUpperCase() }))}
+                          placeholder="Enter IFSC"
+                          placeholderTextColor="#94A3B8"
+                          autoCapitalize="characters"
+                          style={[styles.input, { color: palette.text }]}
+                        />
+                      </View>
+                    </>
+                  )}
+                </View>
+              ) : null}
+
+              <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchCopy}>
+                    <Text style={[styles.inputLabel, { color: palette.text }]}>Instant payout</Text>
+                    <Text style={[styles.helperText, { color: palette.textSoft }]}>
+                      Uses RazorpayX placeholder rails with capped instant fee.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={withdrawForm.instantPayout}
+                    onValueChange={(value) => setWithdrawForm((current) => ({ ...current, instantPayout: value }))}
+                    trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+                    thumbColor={withdrawForm.instantPayout ? '#2563EB' : '#94A3B8'}
+                  />
+                </View>
+              </View>
+
+              <View style={[styles.inputCard, { borderColor: palette.border, backgroundColor: palette.mutedCard }]}>
+                <Text style={[styles.inputLabel, { color: palette.text }]}>OTP verification</Text>
+                <TextInput
+                  value={withdrawForm.otpCode}
+                  onChangeText={(value) => setWithdrawForm((current) => ({ ...current, otpCode: value.replace(/[^0-9]/g, '') }))}
+                  placeholder="Enter 6-digit OTP"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  maxLength={6}
+                  style={[styles.input, { color: palette.text }]}
+                />
+                <Text style={[styles.helperText, { color: palette.textSoft }]}>
+                  Verify this withdrawal for {otpDestination}.
+                </Text>
+              </View>
+
+              <TouchableOpacity onPress={handleSubmitWithdrawal} disabled={submittingPayout} activeOpacity={0.92}>
+                <LinearGradient colors={['#2563EB', '#7C3AED']} style={styles.primaryButton}>
+                  {submittingPayout ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryButtonText}>Confirm withdrawal</Text>
+                      <Ionicons name="arrow-forward" size={18} color="#fff" />
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
 
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{referralData?.stats.totalReferrals || 0}</Text>
-          <Text style={styles.statLabel}>Total Referrals</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>₹{referralData?.stats.availableBalance || 0}</Text>
-          <Text style={styles.statLabel}>Available Balance</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>₹{referralData?.stats.totalEarnings || 0}</Text>
-          <Text style={styles.statLabel}>Total Earnings</Text>
-        </View>
-      </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <LinearGradient colors={palette.hero} style={styles.heroSection}>
+          <Animated.View
+            style={[
+              styles.floatingOrb,
+              styles.orbLeft,
+              {
+                transform: [
+                  {
+                    translateY: orbOne.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, -16],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.floatingOrb,
+              styles.orbRight,
+              {
+                transform: [
+                  {
+                    translateY: orbTwo.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, 18],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Your Referral Code</Text>
-        <View style={styles.referralCodeContainer}>
-          <Text style={styles.referralCode}>{referralData?.stats.referralCode || 'Loading...'}</Text>
-          <View style={styles.referralActions}>
+          <View style={styles.heroHeaderRow}>
             <TouchableOpacity
-              style={[
-                styles.actionButton,
-                applyingCode && styles.disabledButton,
-              ]}
+              onPress={() => navigation.goBack()}
+              style={styles.heroBackButton}
+            >
+              <Ionicons name="arrow-back" size={20} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => loadReferralData('refresh')}
+              style={styles.heroBackButton}
+            >
+              {refreshing ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="refresh" size={18} color="#fff" />
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.heroEyebrow}>Verified subscription commissions</Text>
+          <Text style={styles.heroTitle}>Invite paid subscribers. Withdraw real commission.</Text>
+          <Text style={styles.heroSubtitle}>
+            Your wallet grows only when referred users complete their first paid plan and the payment is verified successfully.
+          </Text>
+
+          <View style={styles.heroBadgeRow}>
+            <View style={styles.heroBadge}>
+              <Ionicons name="flash" size={14} color="#FACC15" />
+              <Text style={styles.heroBadgeText}>20% first-plan commission</Text>
+            </View>
+            <View style={styles.heroBadge}>
+              <Ionicons name="shield-checkmark" size={14} color="#86EFAC" />
+              <Text style={styles.heroBadgeText}>
+                Fraud status: {dashboard.fraudSignals.status}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.walletGlassCard}>
+            <Text style={styles.walletLabel}>Withdrawable balance</Text>
+            <Text style={styles.walletValue}>{formatCurrency(dashboard.wallet.availableBalance)}</Text>
+            <Text style={styles.walletMeta}>
+              {dashboard.wallet.payoutRail} • OTP secured
+            </Text>
+
+            <View style={styles.walletActionRow}>
+              <TouchableOpacity onPress={handleShare} style={styles.walletActionButton}>
+                <Ionicons name="share-social" size={16} color="#fff" />
+                <Text style={styles.walletActionText}>Share invite</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowWithdrawModal(true)}
+                style={[styles.walletActionButton, styles.walletActionPrimary]}
+              >
+                <Ionicons name="wallet" size={16} color="#0F172A" />
+                <Text style={[styles.walletActionText, styles.walletActionPrimaryText]}>Withdraw</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </LinearGradient>
+
+        <View style={styles.metricsGrid}>
+          {[
+            {
+              label: 'Total earned',
+              value: formatCurrency(dashboard.overview.totalReferralCommissionEarned),
+              icon: 'sparkles',
+              tint: '#8B5CF6',
+            },
+            {
+              label: 'Active paid referrals',
+              value: dashboard.overview.activeSubscribedReferrals.toString(),
+              icon: 'people',
+              tint: '#0EA5E9',
+            },
+            {
+              label: 'Pending review',
+              value: formatCurrency(dashboard.overview.pendingCommissions),
+              icon: 'time',
+              tint: '#F59E0B',
+            },
+            {
+              label: 'Conversion rate',
+              value: `${dashboard.overview.conversionRate}%`,
+              icon: 'bar-chart',
+              tint: '#10B981',
+            },
+          ].map((item) => (
+            <View
+              key={item.label}
+              style={[styles.metricCard, { backgroundColor: palette.card, borderColor: palette.border }]}
+            >
+              <View style={[styles.metricIcon, { backgroundColor: `${item.tint}1F` }]}>
+                <Ionicons name={item.icon as any} size={18} color={item.tint} />
+              </View>
+              <Text style={[styles.metricValue, { color: palette.text }]}>{item.value}</Text>
+              <Text style={[styles.metricLabel, { color: palette.textSoft }]}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Referral code</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+                Share this before the first paid subscription is purchased.
+              </Text>
+            </View>
+            <Text style={styles.referralCodeText}>{dashboard.share.referralCode}</Text>
+          </View>
+
+          <View style={styles.deepLinkCard}>
+            <Text style={styles.deepLinkLabel}>Deep link</Text>
+            <Text style={styles.deepLinkValue} numberOfLines={1}>
+              {dashboard.share.deepLink}
+            </Text>
+          </View>
+
+          <View style={styles.applySection}>
+            <TextInput
+              value={referralCodeInput}
+              onChangeText={setReferralCodeInput}
+              placeholder="Enter a referral code"
+              placeholderTextColor="#94A3B8"
+              autoCapitalize="characters"
+              style={[styles.applyInput, { color: palette.text, borderColor: palette.border, backgroundColor: palette.mutedCard }]}
+            />
+            <TouchableOpacity
               onPress={handleApplyCode}
               disabled={applyingCode}
+              style={styles.applyButton}
             >
-              <Text style={[
-                styles.actionButtonText,
-                applyingCode && styles.disabledButtonText,
-              ]}>
-                {applyingCode ? 'Applying...' : 'Apply Code'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={copyReferralCode}
-            >
-              <Text style={styles.actionButtonText}>Share</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setShowWithdrawModal(true)}
-            >
-              <Text style={styles.actionButtonText}>Withdraw</Text>
+              {applyingCode ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.applyButtonText}>Apply</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Apply Referral Code</Text>
-        <View style={styles.applyContainer}>
-          <TextInput
-            style={styles.referralInput}
-            placeholder="Enter referral code"
-            value={referralCode}
-            onChangeText={setReferralCode}
-            autoCapitalize="characters"
-            maxLength={8}
-          />
-          <TouchableOpacity
-            style={[styles.applyButton, applyingCode && styles.disabledButton]}
-            onPress={copyReferralCode}
-            disabled={applyingCode}
-          >
-            {applyingCode ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.applyButtonText}>Apply</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Monthly earnings graph</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+                Verified commissions across recent months.
+              </Text>
+            </View>
+          </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Referral History</Text>
-        {referralData?.referrals && referralData.referrals.length > 0 ? (
-          referralData.referrals.map((referral, index) => (
-            <View key={referral.id || index} style={styles.referralItem}>
-              <View style={styles.referralInfo}>
-                <Text style={styles.referralName}>
-                  {referral.referred?.name || 'Anonymous'}
-                </Text>
-                <Text style={styles.referralStatus}>
-                  Status: {referral.status}
-                </Text>
+          <View style={styles.graphRow}>
+            {dashboard.overview.monthlyGraph.map((point) => (
+              <View key={point.label} style={styles.graphColumn}>
+                <View style={styles.graphBarShell}>
+                  <LinearGradient
+                    colors={['#2563EB', '#8B5CF6']}
+                    style={[
+                      styles.graphBar,
+                      {
+                        height: `${Math.max((point.amount / maxGraphValue) * 100, point.amount ? 18 : 6)}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.graphValue, { color: palette.text }]}>{point.amount ? `₹${Math.round(point.amount)}` : '0'}</Text>
+                <Text style={[styles.graphLabel, { color: palette.textSoft }]}>{point.label}</Text>
               </View>
-              <Text style={styles.referralReward}>
-                +₹{referral.rewardAmount || 50}
-              </Text>
-            </View>
-          ))
-        ) : (
-          <Text style={styles.emptyText}>No referrals yet. Start inviting friends!</Text>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>How It Works</Text>
-        <View style={styles.stepsContainer}>
-          <View style={styles.step}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>1</Text>
-            </View>
-            <Text style={styles.stepText}>Share your referral code with friends</Text>
-          </View>
-          <View style={styles.step}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>2</Text>
-            </View>
-            <Text style={styles.stepText}>Friend signs up using your code</Text>
-          </View>
-          <View style={styles.step}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>3</Text>
-            </View>
-            <Text style={styles.stepText}>You earn ₹50 when they complete signup</Text>
-          </View>
-          <View style={styles.step}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>4</Text>
-            </View>
-            <Text style={styles.stepText}>Withdraw earnings via bank transfer</Text>
+            ))}
           </View>
         </View>
-      </View>
-    </ScrollView>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Referral history</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+                Every commission is tied to a verified first paid subscription.
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.filterRow}>
+            {historyFilters.map((filter) => (
+              <TouchableOpacity
+                key={filter}
+                onPress={() => setSelectedFilter(filter)}
+                style={[
+                  styles.filterPill,
+                  selectedFilter === filter && styles.filterPillActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    selectedFilter === filter && styles.filterTextActive,
+                  ]}
+                >
+                  {filter.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {filteredHistory.length > 0 ? (
+            filteredHistory.map((item) => {
+              const badge = getStatusMeta(
+                item.eligibleForCommission
+                  ? item.paymentStatus === 'paid'
+                    ? 'completed'
+                    : item.paymentStatus
+                  : 'blocked',
+              );
+
+              return (
+                <View
+                  key={item.id}
+                  style={[styles.historyRow, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}
+                >
+                  <View style={styles.historyTopRow}>
+                    <View style={styles.avatarCircle}>
+                      <Text style={styles.avatarText}>
+                        {item.referredUserName.slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.historyCopy}>
+                      <Text style={[styles.historyName, { color: palette.text }]}>{item.referredUserName}</Text>
+                      <Text style={[styles.historyMeta, { color: palette.textSoft }]}>
+                        {formatPlanLabel(item.subscriptionPlan)} • {formatCurrency(item.subscriptionAmount)}
+                      </Text>
+                    </View>
+                    <View style={[styles.badgePill, { backgroundColor: badge.bg }]}>
+                      <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.historyBottomRow}>
+                    <Text style={[styles.historyCommission, { color: palette.text }]}>
+                      {formatCurrency(item.commissionEarned)}
+                    </Text>
+                    <Text style={[styles.historyMeta, { color: palette.textSoft }]}>
+                      {new Date(item.subscriptionDate).toLocaleDateString('en-IN')}
+                    </Text>
+                  </View>
+
+                  {!item.eligibleForCommission && item.ineligibleReason ? (
+                    <Text style={styles.blockedNote}>
+                      Blocked: {item.ineligibleReason.replace(/_/g, ' ')}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })
+          ) : (
+            <Text style={[styles.emptyText, { color: palette.textSoft }]}>
+              No referrals match this filter yet.
+            </Text>
+          )}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Commission ledger</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+                Wallet-ready earnings from verified subscription payments.
+              </Text>
+            </View>
+          </View>
+
+          {dashboard.commissionHistory.slice(0, 5).map((item) => {
+            const badge = getStatusMeta(item.status);
+            return (
+              <View key={item.id} style={[styles.ledgerRow, { borderColor: palette.border }]}>
+                <View>
+                  <Text style={[styles.ledgerTitle, { color: palette.text }]}>{item.referredUserName}</Text>
+                  <Text style={[styles.ledgerBody, { color: palette.textSoft }]}>
+                    {formatPlanLabel(item.subscriptionPlan)} • Source {formatCurrency(item.sourceAmount)}
+                  </Text>
+                </View>
+                <View style={styles.ledgerRight}>
+                  <Text style={[styles.ledgerAmount, { color: palette.text }]}>
+                    {formatCurrency(item.commissionAmount)}
+                  </Text>
+                  <View style={[styles.badgePill, { backgroundColor: badge.bg }]}>
+                    <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Payout preview</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+                Recent withdrawal requests and their release status.
+              </Text>
+            </View>
+          </View>
+
+          {dashboard.payoutHistoryPreview.length > 0 ? (
+            dashboard.payoutHistoryPreview.map((item) => {
+              const badge = getStatusMeta(item.status);
+              return (
+                <View key={item.id} style={[styles.ledgerRow, { borderColor: palette.border }]}>
+                  <View>
+                    <Text style={[styles.ledgerTitle, { color: palette.text }]}>
+                      {formatCurrency(item.netAmount)}
+                    </Text>
+                    <Text style={[styles.ledgerBody, { color: palette.textSoft }]}>
+                      Fee {formatCurrency(item.feeAmount)} • Ref {item.referenceId || item.id.slice(-6)}
+                    </Text>
+                  </View>
+                  <View style={styles.ledgerRight}>
+                    <Text style={[styles.ledgerBody, { color: palette.textSoft }]}>
+                      {new Date(item.createdAt).toLocaleDateString('en-IN')}
+                    </Text>
+                    <View style={[styles.badgePill, { backgroundColor: badge.bg }]}>
+                      <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <Text style={[styles.emptyText, { color: palette.textSoft }]}>
+              No withdrawals yet. Your first payout will appear here.
+            </Text>
+          )}
+        </View>
+
+        <View style={[styles.sectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Subscription plan conversion tracks</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSoft }]}>
+                Choose the plan experiences that drive the strongest verified commissions.
+              </Text>
+            </View>
+          </View>
+
+          {dashboard.subscriptionPlans
+            .filter((plan) => plan.commissionEligible)
+            .map((plan) => (
+              <TouchableOpacity
+                key={plan.id}
+                onPress={() => navigation.navigate('Subscription')}
+                style={[styles.planPreviewCard, { backgroundColor: palette.mutedCard, borderColor: palette.border }]}
+              >
+                <View>
+                  <Text style={[styles.planPreviewName, { color: palette.text }]}>{plan.name}</Text>
+                  <Text style={[styles.planPreviewBody, { color: palette.textSoft }]}>
+                    {formatCurrency(plan.price)} • {plan.billingLabel}
+                  </Text>
+                </View>
+                <Text style={styles.planPreviewHighlight}>{plan.cashbackHighlight}</Text>
+              </TouchableOpacity>
+            ))}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
+    paddingHorizontal: 24,
   },
   loadingText: {
     marginTop: 16,
-    color: '#64748b',
-    fontSize: 16,
-  },
-  header: {
-    padding: 24,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#64748b',
-    textAlign: 'center',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1e293b',
-  },
-  statLabel: {
     fontSize: 14,
-    color: '#6b7280',
   },
-  section: {
+  retryButton: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  retryText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  scrollContent: {
+    paddingBottom: 28,
+  },
+  heroSection: {
     margin: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 30,
+    padding: 22,
+    overflow: 'hidden',
+  },
+  floatingOrb: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  orbLeft: {
+    top: -10,
+    right: -16,
+  },
+  orbRight: {
+    bottom: 110,
+    left: -28,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(96,165,250,0.22)',
+  },
+  heroHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  heroBackButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 34,
+    marginTop: 10,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 10,
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 18,
+  },
+  heroBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  heroBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  walletGlassCard: {
+    marginTop: 22,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    padding: 18,
+  },
+  walletLabel: {
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  walletValue: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '900',
+    marginTop: 10,
+  },
+  walletMeta: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    marginTop: 6,
+  },
+  walletActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  walletActionButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  walletActionPrimary: {
+    backgroundColor: '#FDE68A',
+    borderColor: '#FDE68A',
+  },
+  walletActionText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  walletActionPrimaryText: {
+    color: '#0F172A',
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingHorizontal: 16,
+  },
+  metricCard: {
+    width: '48%',
+    borderRadius: 22,
+    borderWidth: 1,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 6,
+  },
+  metricIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  metricValue: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  metricLabel: {
+    marginTop: 6,
+    fontSize: 13,
+  },
+  sectionCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 26,
+    borderWidth: 1,
+    padding: 18,
+  },
+  sectionHeader: {
+    marginBottom: 14,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 16,
+    fontWeight: '800',
   },
-  referralCodeContainer: {
-    backgroundColor: '#f1f5f9',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
+  sectionSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
   },
-  referralCode: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#0EA5E9',
-    marginBottom: 16,
+  referralCodeText: {
+    color: '#60A5FA',
+    fontSize: 18,
+    fontWeight: '900',
     letterSpacing: 2,
   },
-  referralActions: {
+  deepLinkCard: {
+    borderRadius: 18,
+    backgroundColor: '#0F172A',
+    padding: 14,
+  },
+  deepLinkLabel: {
+    color: '#94A3B8',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  deepLinkValue: {
+    color: '#E2E8F0',
+    marginTop: 6,
+    fontSize: 13,
+  },
+  applySection: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
+    marginTop: 14,
   },
-  actionButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 8,
-  },
-  shareButton: {
-    backgroundColor: '#0EA5E9',
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  disabledButton: {
-    backgroundColor: '#94a3b8',
-  },
-  disabledButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  applyContainer: {
-    gap: 12,
-  },
-  referralInput: {
+  applyInput: {
+    flex: 1,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
   },
   applyButton: {
-    backgroundColor: '#0EA5E9',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: '#2563EB',
+    borderRadius: 16,
+    paddingHorizontal: 18,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   applyButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
     color: '#fff',
+    fontWeight: '700',
   },
-  applywithdrawButton: {
-    backgroundColor: '#0EA5E9',
-    paddingVertical: 12,
-    borderRadius: 8,
+  graphRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  graphColumn: {
+    flex: 1,
     alignItems: 'center',
   },
-  withdrawButtonText: {
+  graphBarShell: {
+    height: 150,
+    width: '100%',
+    justifyContent: 'flex-end',
+    borderRadius: 16,
+    backgroundColor: 'rgba(148,163,184,0.12)',
+    padding: 8,
+  },
+  graphBar: {
+    width: '100%',
+    borderRadius: 12,
+  },
+  graphValue: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  graphLabel: {
+    marginTop: 4,
+    fontSize: 12,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  filterPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#E2E8F0',
+  },
+  filterPillActive: {
+    backgroundColor: '#2563EB',
+  },
+  filterText: {
+    color: '#334155',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  filterTextActive: {
     color: '#fff',
-    fontSize: 14,
+  },
+  historyRow: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 10,
+  },
+  historyTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#C7D2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#312E81',
+    fontWeight: '800',
+  },
+  historyCopy: {
+    flex: 1,
+  },
+  historyName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  historyMeta: {
+    fontSize: 12,
+    marginTop: 4,
+  },
+  badgePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  historyBottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    alignItems: 'center',
+  },
+  historyCommission: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  blockedNote: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#B91C1C',
     fontWeight: '600',
   },
-  methodSelector: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  methodOption: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    backgroundColor: '#fff',
-  },
-  selectedMethod: {
-    backgroundColor: '#0EA5E9',
-    borderColor: '#0EA5E9',
-  },
-  methodText: {
-    fontSize: 14,
-    color: '#475569',
-  },
-  selectedMethodText: {
-    fontSize: 14,
-    color: '#fff',
-  },
-  referralItem: {
+  ledgerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-    backgroundColor: '#f9f9f9',
+    paddingVertical: 14,
+    borderTopWidth: 1,
   },
-  referralInfo: {
-    flex: 1,
+  ledgerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
   },
-  referralName: {
+  ledgerBody: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  ledgerRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  ledgerAmount: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1e293b',
-  },
-  referralStatus: {
-    fontSize: 14,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  referralReward: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#10b981',
+    fontWeight: '800',
   },
   emptyText: {
-    textAlign: 'center',
-    color: '#64748b',
-    fontStyle: 'italic',
-    paddingVertical: 20,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
   },
-  stepsContainer: {
-    gap: 16,
+  planPreviewCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 10,
   },
-  step: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  planPreviewName: {
+    fontSize: 15,
+    fontWeight: '700',
   },
-  stepNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#0EA5E9',
-    justifyContent: 'center',
-    alignItems: 'center',
+  planPreviewBody: {
+    marginTop: 4,
+    fontSize: 12,
   },
-  stepNumberText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  stepText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#475569',
-    lineHeight: 20,
+  planPreviewHighlight: {
+    marginTop: 10,
+    color: '#2563EB',
+    fontSize: 12,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(2, 6, 23, 0.48)',
+    justifyContent: 'flex-end',
   },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '90%',
-    maxWidth: 320,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
+  modalCard: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    maxHeight: '88%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1e293b',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+    maxWidth: 260,
   },
   closeButton: {
-    padding: 8,
-    borderRadius: 12,
-    backgroundColor: '#f3f4f6',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(148,163,184,0.12)',
   },
-  closeButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  modalBody: {
-    marginBottom: 20,
-  },
-  modalDescription: {
-    fontSize: 16,
-    color: '#64748b',
-    textAlign: 'center',
-    marginBottom: 16,
-    lineHeight: 24,
-  },
-  balanceInfo: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: 8,
-  },
-  withdrawInput: {
+  inputCard: {
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
+    padding: 14,
+    marginBottom: 12,
   },
-  withdrawActions: {
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  input: {
+    fontSize: 15,
+    marginTop: 10,
+    paddingVertical: 0,
+  },
+  helperText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  savedMethodSection: {
+    marginBottom: 12,
+  },
+  savedMethodCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 10,
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  savedMethodCopy: {
+    flex: 1,
+  },
+  savedMethodTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  savedMethodBody: {
+    marginTop: 4,
+    fontSize: 12,
+  },
+  defaultChip: {
+    color: '#2563EB',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  togglePill: {
+    flex: 1,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  togglePillActive: {
+    backgroundColor: '#2563EB',
+  },
+  toggleText: {
+    color: '#334155',
+    fontWeight: '700',
+  },
+  toggleTextActive: {
+    color: '#fff',
+  },
+  manualMethodFields: {
+    marginBottom: 2,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 12,
   },
-  withdrawButton: {
-    backgroundColor: '#0EA5E9',
-    paddingVertical: 12,
+  switchCopy: {
+    flex: 1,
+  },
+  primaryButton: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
   },
 });

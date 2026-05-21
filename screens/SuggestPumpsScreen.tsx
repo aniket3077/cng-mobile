@@ -12,10 +12,9 @@ import * as Location from 'expo-location';
 import { colors, spacing, radius } from '../theme';
 import { suggestPumpsApi } from '../lib/api';
 import { StationSuggestion } from '../types';
+import { AppScreenProps } from '../types/navigation';
 
-interface Props {
-  navigation: any;
-}
+type Props = AppScreenProps<'SuggestPumps'>;
 
 export default function SuggestPumpsScreen({ navigation }: Props) {
   const [suggestions, setSuggestions] = useState<StationSuggestion[]>([]);
@@ -51,7 +50,6 @@ export default function SuggestPumpsScreen({ navigation }: Props) {
       setLocation(coords);
       await fetchSuggestions(coords);
     } catch (error) {
-      console.error('Location error:', error);
       Alert.alert('Error', 'Failed to get your location. Please try again.');
       setLoading(false);
     }
@@ -67,7 +65,6 @@ export default function SuggestPumpsScreen({ navigation }: Props) {
       });
       setSuggestions(response.suggestions || []);
     } catch (error: any) {
-      console.error('Fetch suggestions error:', error);
       const message = error.response?.data?.error || 'Failed to fetch pump suggestions.';
       Alert.alert('Error', message);
     } finally {

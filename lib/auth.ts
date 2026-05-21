@@ -1,55 +1,119 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+import { secureStorage } from './secureStorage';
+import { storageKeys } from './storageKeys';
 
-const TOKEN_KEY = 'authToken';
-const USER_KEY = 'user';
+const REFRESH_TOKEN_KEY = 'refreshToken';
 
-// PRODUCTION NOTE:
-// For better security, use expo-secure-store instead of AsyncStorage:
-// import * as SecureStore from 'expo-secure-store';
-// SecureStore provides encrypted storage for sensitive data
+const refreshTokenStorageOptions: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
+/** Decode a JWT payload without a library (reads the base64url middle segment). */
+function decodeJwtExp(token: string): number | null {
+  try {
+    const payloadBase64 = token.split('.')[1];
+    if (!payloadBase64) return null;
+    // base64url → standard base64
+    const base64 = payloadBase64.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(base64);
+    const payload = JSON.parse(json);
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
 
 export const authStorage = {
   /**
    * Save authentication token
    */
   async saveToken(token: string): Promise<void> {
-    await AsyncStorage.setItem(TOKEN_KEY, token);
+    await secureStorage.setItem(storageKeys.authToken, token);
+  },
+
+  async saveRefreshToken(token: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      await AsyncStorage.setItem(REFRESH_TOKEN_KEY, token);
+      return;
+    }
+
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token, refreshTokenStorageOptions);
+  },
+
+  async saveSession(token: string, refreshToken: string): Promise<void> {
+    await authStorage.saveToken(token);
+    await authStorage.saveRefreshToken(refreshToken);
   },
 
   /**
    * Get authentication token
    */
   async getToken(): Promise<string | null> {
-    return await AsyncStorage.getItem(TOKEN_KEY);
+    return secureStorage.getItem(storageKeys.authToken);
+  },
+
+  async getRefreshToken(): Promise<string | null> {
+    if (Platform.OS === 'web') {
+      return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+    }
+
+    return SecureStore.getItemAsync(REFRESH_TOKEN_KEY, refreshTokenStorageOptions);
   },
 
   /**
    * Save user data
    */
   async saveUser(user: any): Promise<void> {
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
+    // User data is not highly sensitive, but we can store it securely too
+    const userStr = JSON.stringify(user);
+    await secureStorage.setItem(storageKeys.user, userStr);
   },
 
   /**
    * Get user data
    */
   async getUser(): Promise<any | null> {
-    const userData = await AsyncStorage.getItem(USER_KEY);
+    const userData = await secureStorage.getItem(storageKeys.user);
     return userData ? JSON.parse(userData) : null;
   },
 
   /**
-   * Check if user is authenticated
+   * Check if user is authenticated AND the token is not expired.
+   * Decodes the JWT exp claim locally — no network call needed.
    */
   async isAuthenticated(): Promise<boolean> {
     const token = await this.getToken();
-    return !!token;
+    if (!token) return false;
+
+    const exp = decodeJwtExp(token);
+    if (exp === null) {
+      // Malformed token — clear it and treat as logged out
+      await this.clearAuth();
+      return false;
+    }
+
+    const nowSec = Date.now() / 1000;
+    if (nowSec >= exp) {
+      // Token expired — clean up to avoid a stale state
+      await this.clearAuth();
+      return false;
+    }
+
+    return true;
   },
 
   /**
    * Clear all auth data (logout)
    */
   async clearAuth(): Promise<void> {
-    await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+    await secureStorage.multiRemove([
+      storageKeys.authToken,
+      storageKeys.refreshToken,
+      storageKeys.user,
+    ]);
+    await AsyncStorage.removeItem(storageKeys.profileImage);
   },
 };
+

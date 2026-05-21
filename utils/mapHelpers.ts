@@ -36,26 +36,16 @@ export const getDirections = async (
   end: {lat: number; lng: number},
   mode: string = 'driving'
 ) => {
-  try {
-    const origin = `${start.lat},${start.lng}`;
-    const destination = `${end.lat},${end.lng}`;
-    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) {
-      throw new Error('EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not configured');
-    }
-    
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=${mode}&key=${apiKey}`
-    );
-    
-    const data = await response.json();
-    
-    if (data.routes && data.routes.length > 0) {
-      const points = decodePolyline(data.routes[0].overview_polyline.points);
-      return { points, route: data.routes[0] };
-    }
-  } catch (error) {
-    console.error('Directions error:', error);
-  }
-  return null;
+  const points = [
+    { latitude: start.lat, longitude: start.lng },
+    { latitude: end.lat, longitude: end.lng },
+  ];
+
+  return {
+    points,
+    route: {
+      mode,
+      fallback: true,
+    },
+  };
 };

@@ -33,6 +33,8 @@ interface UserProfile {
   email: string;
   phone: string | null;
   vehicles?: Vehicle[];
+  tripCount?: number;
+  favoriteCount?: number;
 }
 
 export default function ProfileScreen({ navigation }: Props) {
@@ -40,6 +42,8 @@ export default function ProfileScreen({ navigation }: Props) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [tripCount, setTripCount] = useState<number | null>(null);
+  const [favoriteCount, setFavoriteCount] = useState<number | null>(null);
 
   useEffect(() => {
     loadUserProfile();
@@ -57,6 +61,8 @@ export default function ProfileScreen({ navigation }: Props) {
       if (res?.user) {
         setUser(res.user);
         await authStorage.saveUser(res.user);
+        setTripCount(res.user.tripCount ?? null);
+        setFavoriteCount(res.user.favoriteCount ?? null);
       }
     } catch (error) {
       console.error('Failed to load user profile:', error);
@@ -185,12 +191,12 @@ export default function ProfileScreen({ navigation }: Props) {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>12</Text>
+            <Text style={styles.statValue}>{tripCount !== null ? tripCount : '--'}</Text>
             <Text style={styles.statLabel}>Trips</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>8</Text>
+            <Text style={styles.statValue}>{favoriteCount !== null ? favoriteCount : '--'}</Text>
             <Text style={styles.statLabel}>Favorites</Text>
           </View>
         </View>

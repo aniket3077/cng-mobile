@@ -24,13 +24,11 @@ import {
   PasswordResetSession,
   sanitizeOtp,
 } from '../lib/passwordReset';
+import { AppScreenProps } from '../types/navigation';
 
 const { height } = Dimensions.get('window');
 
-interface Props {
-  navigation: any;
-  route: any;
-}
+type Props = AppScreenProps<'EnterOtp'>;
 
 export default function EnterOtpScreen({ navigation, route }: Props) {
   const [otp, setOtp] = useState('');
@@ -78,7 +76,7 @@ export default function EnterOtpScreen({ navigation, route }: Props) {
   useEffect(() => {
     const loadSession = async () => {
       const savedSession = await passwordResetStorage.getSession();
-      const routeIdentifier = route?.params?.identifier;
+      const routeIdentifier = route.params?.identifier;
 
       if (!savedSession || (routeIdentifier && savedSession.identifier !== routeIdentifier)) {
         setIsLoadingSession(false);
@@ -96,7 +94,7 @@ export default function EnterOtpScreen({ navigation, route }: Props) {
     };
 
     void loadSession();
-  }, [navigation, route?.params?.identifier]);
+  }, [navigation, route.params?.identifier]);
 
   useEffect(() => {
     if (!isLoadingSession && session) {
@@ -142,19 +140,57 @@ export default function EnterOtpScreen({ navigation, route }: Props) {
       const response = await authApi.verifyOtp({
         identifier: session.identifier,
         otp,
+        sessionToken: session.sessionToken,
       });
 
-      await passwordResetStorage.updateSession({
+      const updatedSession = await passwordResetStorage.updateSession({
+        sessionToken: response.sessionToken || session.sessionToken,
         resetToken: response.resetToken,
         resetTokenExpiresAt: Date.now() + (response.resetTokenExpiresIn || 600) * 1000,
       });
 
+      if (!updatedSession?.resetToken) {
+        throw new Error('Reset session expired. Please verify OTP again.');
+      }
+
+      setSession(updatedSession);
       setOtp('');
       navigation.navigate('ResetPassword', {
         identifier: session.identifier,
       });
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to verify OTP. Please try again.';
+      let latestSession: PasswordResetSession | null = session;
+
+      const nextSessionToken = error.response?.data?.sessionToken;
+      if (nextSessionToken) {
+        const refreshedSession = await passwordResetStorage.updateSession({
+          sessionToken: nextSessionToken,
+        });
+
+        if (refreshedSession) {
+          latestSession = refreshedSession;
+          setSession(refreshedSession);
+        }
+      }
+
+      const updatedSession = await passwordResetStorage.updateSession({
+        verifyAttempts: (latestSession?.verifyAttempts ?? 0) + 1,
+      });
+
+      if (updatedSession) {
+        latestSession = updatedSession;
+        setSession(updatedSession);
+      }
+
+      if ((latestSession?.verifyAttempts ?? 0) >= 5) {
+        await passwordResetStorage.clearSession();
+        Alert.alert('Too many failed attempts. Please request a new OTP.');
+        navigation.replace('ForgotPassword');
+        return;
+      }
+
+      const message =
+        error.response?.data?.error || error.message || 'Failed to verify OTP. Please try again.';
       if (message.toLowerCase().includes('expired')) {
         setOtp('');
       }
@@ -173,6 +209,7 @@ export default function EnterOtpScreen({ navigation, route }: Props) {
     try {
       const response = await authApi.forgotPassword({
         identifier: session.identifier,
+        sessionToken: session.sessionToken,
       });
       const now = Date.now();
       const nextSession: PasswordResetSession = {
@@ -181,6 +218,7 @@ export default function EnterOtpScreen({ navigation, route }: Props) {
         deliveryTarget: response.deliveryTarget || session.deliveryTarget,
         otpExpiresAt: now + (response.expiresIn || 600) * 1000,
         resendAvailableAt: now + (response.resendAfter || 60) * 1000,
+        sessionToken: response.sessionToken,
         resetToken: undefined,
         resetTokenExpiresAt: undefined,
       };
