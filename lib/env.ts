@@ -16,17 +16,12 @@ function normalizeApiUrl(value: string | undefined) {
 }
 
 function buildMobileEnv(): MobileEnv {
-  const apiUrl = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL);
+  const apiUrl = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL) || 'https://cng-backend.vercel.app';
   const appEnv = (process.env.EXPO_PUBLIC_APP_ENV?.trim() || (__DEV__ ? 'development' : 'production')) as MobileEnv['appEnv'];
 
-  const missing: string[] = [];
-
-  if (!apiUrl) {
-    missing.push('EXPO_PUBLIC_API_URL');
-  }
-
-  if (missing.length > 0) {
-    throw new Error(`Missing mobile environment variables: ${missing.join(', ')}`);
+  // Defensive fallback to prevent immediate boot crash.
+  if (!process.env.EXPO_PUBLIC_API_URL && __DEV__) {
+    console.warn('Warning: EXPO_PUBLIC_API_URL is missing. Using fallback production Vercel backend.');
   }
 
   return {
