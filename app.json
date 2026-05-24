@@ -1,11 +1,35 @@
 {
   "expo": {
+    "name": "CNG Bharat",
+    "slug": "cngbharat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cngbharat.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.cngbharat.app"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
     "extra": {
       "eas": {
-        "projectId": "58637038-bf21-442b-b96a-249c47187c96"
+        "projectId": "e1459c8f-ab79-40a9-a1f5-349dcf243e11"
       }
     },
-    
-    "slug": "cngbharat"
+    "owner": "aniket3077"
   }
 }

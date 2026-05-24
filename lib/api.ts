@@ -383,7 +383,7 @@ export const customerProfileApi = {
     const response = await api.post('/customer/subscription', data);
     return response.data;
   },
-  createOrder: async (data: { planId: string }) => {
+  createOrder: async (data: { planId: string; amount: number }) => {
     const headers = await buildSensitiveRequestHeaders(data);
     const response = await api.post('/payments/create-order', data, { headers });
     return response.data;

@@ -52,6 +52,7 @@ export default function PaymentScreen({ navigation, route }: Props) {
     try {
       const orderResponse = await customerProfileApi.createOrder({
         planId,
+        amount: amountRupees,
       });
 
       if (!orderResponse?.success) {

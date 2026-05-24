@@ -522,65 +522,70 @@ export default function MapHomeScreen({ navigation, route }: Props) {
   const fetchNearbyStations = async (lat: number, lng: number, radius: number = 10) => {
     try {
       setLoading(true);
-      const response = await nearbyStationsApi.list({
-        lat,
-        lng,
-        radius: Math.round(radius * 1000),
-        limit: 60,
-        googleOnly: SHOW_ONLY_GOOGLE,
-      });
 
-      const googleStations = normalizeGoogleNearbyStations(response?.stations || []);
-
-      if (googleStations.length === 0) {
-        if (SHOW_ONLY_GOOGLE) {
-          // User requested Google-only stations; show empty list if Google returns nothing
-          setAllStations([]);
-          setStations([]);
-          return;
-        }
-
-        const fallback = await stationsApi.list({
+      // Fetch Google Nearby Stations and local Database Stations in parallel
+      const [googleResponse, databaseResponse] = await Promise.allSettled([
+        nearbyStationsApi.list({
+          lat,
+          lng,
+          radius: Math.round(radius * 1000),
+          limit: 60,
+          googleOnly: SHOW_ONLY_GOOGLE,
+        }),
+        stationsApi.list({
           lat,
           lng,
           radius,
-        });
-        const nextStations: Station[] = fallback.stations || [];
-        setAllStations(nextStations);
-        setStations(nextStations);
-        return;
+        })
+      ]);
+
+      let googleStations: Station[] = [];
+      if (googleResponse.status === 'fulfilled') {
+        googleStations = normalizeGoogleNearbyStations(googleResponse.value?.stations || []);
+      } else {
+        logger.warn('Google Places nearby lookup failed', googleResponse.reason);
       }
 
-      const nextStations: Station[] = googleStations;
+      let databaseStations: Station[] = [];
+      if (databaseResponse.status === 'fulfilled') {
+        databaseStations = databaseResponse.value?.stations || [];
+      } else {
+        logger.warn('Database local station lookup failed', databaseResponse.reason);
+      }
+
+      // Merge Google stations and local database stations
+      // Prioritize database stations since they contain rich custom details (partner status, cngQuantityKg, crowd level)
+      const mergedMap = new Map<string, Station>();
+
+      // Add database stations first
+      databaseStations.forEach((station) => {
+        const key = `${station.lat.toFixed(4)}_${station.lng.toFixed(4)}`;
+        mergedMap.set(key, station);
+      });
+
+      // Add google stations only if no database station exists at the same approximate location
+      if (!SHOW_ONLY_GOOGLE) {
+        googleStations.forEach((station) => {
+          const key = `${station.lat.toFixed(4)}_${station.lng.toFixed(4)}`;
+          if (!mergedMap.has(key)) {
+            mergedMap.set(key, station);
+          }
+        });
+      } else {
+        // If show only google requested, only keep google stations
+        mergedMap.clear();
+        googleStations.forEach((station) => {
+          const key = `${station.lat.toFixed(4)}_${station.lng.toFixed(4)}`;
+          mergedMap.set(key, station);
+        });
+      }
+
+      const nextStations = Array.from(mergedMap.values());
       setAllStations(nextStations);
       setStations(nextStations);
     } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || '';
-      const isNearbyBillingDenied =
-        error?.response?.status === 502 &&
-        typeof message === 'string' &&
-        (message.includes('REQUEST_DENIED') || message.includes('enable Billing'));
-
-      if (isNearbyBillingDenied) {
-        logger.warn('Nearby station provider unavailable, using fallback stations.');
-      } else {
-        logger.warn('Nearby station lookup failed', error);
-      }
-
-      // Graceful fallback when Google Places is unavailable (e.g. billing not enabled)
-      try {
-        const fallback = await stationsApi.list({
-          lat,
-          lng,
-          radius,
-        });
-        const nextStations: Station[] = fallback.stations || [];
-        setAllStations(nextStations);
-        setStations(nextStations);
-      } catch (fallbackError) {
-        logger.warn('Fallback station lookup failed', fallbackError);
-        Alert.alert('Error', 'Failed to fetch nearby stations');
-      }
+      logger.warn('Fetch nearby stations master process failed', error);
+      Alert.alert('Error', 'Failed to fetch nearby stations');
     } finally {
       setLoading(false);
     }

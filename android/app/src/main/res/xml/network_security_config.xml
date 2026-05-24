@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-  <domain-config cleartextTrafficPermitted="false">
-    <domain includeSubdomains="false">cng-backend.vercel.app</domain>
-    <pin-set expiration="2027-12-31">
-      <pin digest="SHA-256">fndKWNHkmWFva8LCkbaQ6j1HS5JLIT9dD8JdQm41s7o=</pin>
-    </pin-set>
-  </domain-config>
-</network-security-config>
