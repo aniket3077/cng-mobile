@@ -20,7 +20,12 @@
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.cngbharat.app"
+      "package": "com.cngbharat.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBu0svhEr_Y1OtNydq4FkAtiTGvWIwFHH4"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/logo.png"
