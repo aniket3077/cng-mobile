@@ -36,6 +36,7 @@ interface PayoutDashboard {
     availableBalance: number;
     totalCommissionEarned: number;
     pendingCommissions: number;
+    pendingWithdrawals?: number;
     totalWithdrawn: number;
     minimumWithdrawal: number;
     maximumWithdrawal: number;
@@ -57,6 +58,8 @@ interface PayoutDashboard {
     createdAt: string;
     referenceId?: string | null;
     receiptLabel: string;
+    payoutDeadline?: string;
+    adminRemarks?: string | null;
   }>;
   commissionLedger: Array<{
     id: string;
@@ -76,23 +79,23 @@ interface PayoutDashboard {
 }
 
 const lightPalette = {
-  bg: '#EEF4FF',
+  bg: '#FFFFFF',
   card: '#FFFFFF',
-  mutedCard: 'rgba(255,255,255,0.84)',
+  mutedCard: '#F8FAFC',
   text: '#0F172A',
   textSoft: '#475569',
-  border: 'rgba(148,163,184,0.22)',
-  hero: ['#0B1020', '#142850', '#1D4ED8'] as const,
+  border: '#E2E8F0',
+  hero: ['#064E3B', '#047857', '#10B981'] as const,
 };
 
 const darkPalette = {
-  bg: '#030712',
-  card: '#0B1326',
-  mutedCard: 'rgba(11,19,38,0.84)',
-  text: '#F8FAFC',
-  textSoft: '#9FB0CB',
-  border: 'rgba(148,163,184,0.16)',
-  hero: ['#020617', '#07142C', '#123B7A'] as const,
+  bg: '#FFFFFF',
+  card: '#FFFFFF',
+  mutedCard: '#F8FAFC',
+  text: '#0F172A',
+  textSoft: '#475569',
+  border: '#E2E8F0',
+  hero: ['#064E3B', '#047857', '#10B981'] as const,
 };
 
 function formatCurrency(amount: number) {
@@ -263,7 +266,7 @@ export default function PayoutScreen({ navigation }: Props) {
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: palette.bg }]}>
-        <ActivityIndicator size="large" color="#60A5FA" />
+        <ActivityIndicator size="large" color="#10B981" />
         <Text style={[styles.loadingText, { color: palette.textSoft }]}>Preparing payout center…</Text>
       </View>
     );
@@ -320,8 +323,8 @@ export default function PayoutScreen({ navigation }: Props) {
                       style={[
                         styles.savedMethodCard,
                         {
-                          backgroundColor: form.payoutMethodId === method.id ? 'rgba(96,165,250,0.14)' : palette.mutedCard,
-                          borderColor: form.payoutMethodId === method.id ? '#60A5FA' : palette.border,
+                          backgroundColor: form.payoutMethodId === method.id ? 'rgba(16,185,129,0.14)' : palette.mutedCard,
+                          borderColor: form.payoutMethodId === method.id ? '#10B981' : palette.border,
                         },
                       ]}
                     >
@@ -418,8 +421,8 @@ export default function PayoutScreen({ navigation }: Props) {
                   <Switch
                     value={form.instantPayout}
                     onValueChange={(value) => setForm((current) => ({ ...current, instantPayout: value }))}
-                    trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
-                    thumbColor={form.instantPayout ? '#2563EB' : '#94A3B8'}
+                    trackColor={{ false: '#CBD5E1', true: '#A7F3D0' }}
+                    thumbColor={form.instantPayout ? '#10B981' : '#94A3B8'}
                   />
                 </View>
               </View>
@@ -440,8 +443,29 @@ export default function PayoutScreen({ navigation }: Props) {
                 </Text>
               </View>
 
+              <View style={[styles.noticeBanner, { backgroundColor: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.15)' }]}>
+                <Ionicons name="time" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
+                <Text style={{ color: palette.textSoft, fontSize: 12, flex: 1, fontWeight: '500' }}>
+                  Withdrawals are manually reviewed and processed within 24 hours.
+                </Text>
+              </View>
+              
+              <View style={[styles.noticeBanner, { backgroundColor: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.15)', marginBottom: 16 }]}>
+                <Ionicons name="calendar" size={16} color="#10B981" style={{ marginRight: 8 }} />
+                <Text style={{ color: palette.textSoft, fontSize: 12, flex: 1, fontWeight: '500' }}>
+                  Estimated payout time: {new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true,
+                  })}
+                </Text>
+              </View>
+
               <TouchableOpacity onPress={handleSubmit} disabled={submitting}>
-                <LinearGradient colors={['#2563EB', '#7C3AED']} style={styles.primaryButton}>
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.primaryButton}>
                   {submitting ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
@@ -482,12 +506,24 @@ export default function PayoutScreen({ navigation }: Props) {
           </View>
 
           <TouchableOpacity onPress={() => setShowRequestModal(true)}>
-            <LinearGradient colors={['#FDE68A', '#F59E0B']} style={styles.withdrawButton}>
+            <LinearGradient colors={['#A3E635', '#84CC16']} style={styles.withdrawButton}>
               <Ionicons name="wallet" size={16} color="#0F172A" />
               <Text style={styles.withdrawButtonText}>Request withdrawal</Text>
             </LinearGradient>
           </TouchableOpacity>
         </LinearGradient>
+
+        <View style={[styles.mainNoticeCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(245,158,11,0.12)', alignItems: 'center', justifyContent: 'center', display: 'flex' }}>
+            <Ionicons name="time" size={20} color="#F59E0B" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: palette.text, fontSize: 13, fontWeight: '700' }}>24-Hour Processing Notice</Text>
+            <Text style={{ color: palette.textSoft, fontSize: 11, marginTop: 2 }}>
+              Withdrawals are manually reviewed and processed within 24 hours.
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.metricsGrid}>
           {[
@@ -561,6 +597,23 @@ export default function PayoutScreen({ navigation }: Props) {
                       {item.statusMessage}
                     </Text>
                   ) : null}
+                  {item.payoutDeadline && (item.status === 'pending' || item.status === 'processing') ? (
+                    <Text style={[styles.historyBody, { color: '#F59E0B', fontWeight: '600' }]}>
+                      Est. Payout: {new Date(item.payoutDeadline).toLocaleString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true,
+                      })}
+                    </Text>
+                  ) : null}
+                  {item.adminRemarks ? (
+                    <Text style={[styles.historyBody, { color: '#EF4444', fontWeight: '600' }]}>
+                      Remarks: {item.adminRemarks}
+                    </Text>
+                  ) : null}
                 </View>
               );
             })
@@ -608,7 +661,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   retryButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#10B981',
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 14,
@@ -758,7 +811,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   defaultChip: {
-    color: '#2563EB',
+    color: '#10B981',
     fontSize: 11,
     fontWeight: '800',
   },
@@ -900,7 +953,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   togglePillActive: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#10B981',
   },
   toggleText: {
     color: '#334155',
@@ -931,5 +984,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
+  },
+  mainNoticeCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  noticeBanner: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

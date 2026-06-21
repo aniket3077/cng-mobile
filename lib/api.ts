@@ -371,6 +371,10 @@ export const customerProfileApi = {
     const response = await api.get('/customer/profile');
     return response.data;
   },
+  deleteAccount: async () => {
+    const response = await api.delete('/customer/account');
+    return response.data;
+  },
   getSubscriptionStatus: async () => {
     const response = await api.get('/customer/subscription');
     return response.data;
@@ -379,11 +383,19 @@ export const customerProfileApi = {
     const response = await api.put('/customer/profile', data);
     return response.data;
   },
+  submitSupportTicket: async (data: {
+    subject: string;
+    description: string;
+    category: string;
+  }) => {
+    const response = await api.post('/customer/support', data);
+    return response.data;
+  },
   subscribe: async (data: { planType: string; autoPay?: boolean }) => {
     const response = await api.post('/customer/subscription', data);
     return response.data;
   },
-  createOrder: async (data: { planId: string; amount: number }) => {
+  createOrder: async (data: { planId: string; amount?: number }) => {
     const headers = await buildSensitiveRequestHeaders(data);
     const response = await api.post('/payments/create-order', data, { headers });
     return response.data;

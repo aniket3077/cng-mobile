@@ -84,6 +84,10 @@ export default function SignupScreen({ navigation }: Props) {
       Alert.alert('Error', 'Please enter your mobile number');
       return;
     }
+    if (!/^\d{10,15}$/.test(phone.trim())) {
+      Alert.alert('Error', 'Mobile number must be between 10 and 15 digits');
+      return;
+    }
     if (!vehicleNo.trim()) {
       Alert.alert('Error', 'Please enter your vehicle number');
       return;
@@ -96,16 +100,32 @@ export default function SignupScreen({ navigation }: Props) {
       Alert.alert('Error', 'Please enter a password');
       return;
     }
-    if (!acceptedTerms) {
-      Alert.alert('Terms Required', 'Please accept the Terms and Conditions and Privacy Policy to continue');
+    if (password.length < 12) {
+      Alert.alert('Error', 'Password must be at least 12 characters');
       return;
     }
-    if (password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters');
+    if (!/[a-z]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one lowercase letter');
+      return;
+    }
+    if (!/[A-Z]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one uppercase letter');
+      return;
+    }
+    if (!/[0-9]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one number');
+      return;
+    }
+    if (!/[^a-zA-Z0-9]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one special character');
       return;
     }
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
+      return;
+    }
+    if (!acceptedTerms) {
+      Alert.alert('Terms Required', 'Please accept the Terms and Conditions and Privacy Policy to continue');
       return;
     }
 
@@ -127,7 +147,18 @@ export default function SignupScreen({ navigation }: Props) {
       await authStorage.saveUser(response.user);
       setIsAuthenticated(true);
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Signup failed. Please try again.';
+      let message = 'Signup failed. Please try again.';
+      if (error.response?.data) {
+        const data = error.response.data;
+        if (data.details?.fieldErrors) {
+          const errors = Object.entries(data.details.fieldErrors)
+            .map(([field, errs]: any) => `${field.charAt(0).toUpperCase() + field.slice(1)}: ${errs.join(', ')}`)
+            .join('\n');
+          message = errors || data.error || message;
+        } else {
+          message = data.error || message;
+        }
+      }
       Alert.alert('Error', message);
     } finally {
       setLoading(false);
@@ -279,7 +310,7 @@ export default function SignupScreen({ navigation }: Props) {
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="Password (min 8 characters)"
+                  placeholder="Password (min 12 chars, mixed case, symbol)"
                   placeholderTextColor="#9CA3AF"
                   value={password}
                   onChangeText={setPassword}

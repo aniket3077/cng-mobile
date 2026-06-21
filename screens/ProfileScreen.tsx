@@ -9,8 +9,13 @@ import {
   Alert,
   ActivityIndicator,
   StatusBar,
+  TextInput,
+  Modal,
+  Linking,
+  Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authStorage } from '../lib/auth';
@@ -44,6 +49,119 @@ export default function ProfileScreen({ navigation }: Props) {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [tripCount, setTripCount] = useState<number | null>(null);
   const [favoriteCount, setFavoriteCount] = useState<number | null>(null);
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    phone: '',
+  });
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+
+  const handleOpenEditModal = () => {
+    if (user) {
+      setEditForm({
+        name: user.name || '',
+        phone: user.phone || '',
+      });
+      setShowEditModal(true);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editForm.name.trim()) {
+      Alert.alert('Validation Error', 'Name is required');
+      return;
+    }
+    if (editForm.phone && !/^\d{10,15}$/.test(editForm.phone)) {
+      Alert.alert('Validation Error', 'Phone must be between 10 and 15 digits');
+      return;
+    }
+
+    setSubmittingEdit(true);
+    try {
+      const response = await customerProfileApi.update({
+        name: editForm.name.trim(),
+        phone: editForm.phone.trim() || null,
+      });
+      
+      Alert.alert('Success', 'Profile updated successfully');
+      
+      if (response.user) {
+        setUser(response.user);
+        await authStorage.saveUser(response.user);
+      }
+      setShowEditModal(false);
+    } catch (error: any) {
+      const errMsg = error.response?.data?.error || error.message || 'Failed to update profile';
+      Alert.alert('Error', errMsg);
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const [supportForm, setSupportForm] = useState({
+    category: 'app_bug',
+    subject: '',
+    description: '',
+  });
+  const [submittingSupport, setSubmittingSupport] = useState(false);
+
+  const [showDataModal, setShowDataModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({
+    notificationsEnabled: true,
+    locationTrackingEnabled: true,
+  });
+
+  const handleOpenSupport = () => {
+    setSupportForm({
+      category: 'app_bug',
+      subject: '',
+      description: '',
+    });
+    setShowSupportModal(true);
+  };
+
+  const handleContactWhatsApp = () => {
+    Linking.openURL('https://wa.me/919999999999?text=Hello%20CNG%20Bharat%20Support');
+  };
+
+  const handleContactEmail = () => {
+    Linking.openURL('mailto:support@cngbharat.com?subject=CNG%20Bharat%20Support%20Request');
+  };
+
+  const handleContactPhone = () => {
+    Linking.openURL('tel:+919999999999');
+  };
+
+  const handleSubmitSupport = async () => {
+    if (!supportForm.subject.trim() || !supportForm.description.trim()) {
+      Alert.alert('Validation Error', 'Please complete the subject and description.');
+      return;
+    }
+
+    setSubmittingSupport(true);
+    try {
+      const res = await customerProfileApi.submitSupportTicket({
+        subject: supportForm.subject.trim(),
+        description: supportForm.description.trim(),
+        category: supportForm.category,
+      });
+
+      const ticketNum = res.ticket?.ticketNumber || 'Submitted';
+      Alert.alert(
+        'Ticket Created',
+        `Your support request has been submitted successfully.\n\nTicket Number: ${ticketNum}\nOur team will contact you shortly.`,
+        [{ text: 'OK', onPress: () => setShowSupportModal(false) }]
+      );
+    } catch (error: any) {
+      const errMsg = error.response?.data?.error || error.message || 'Failed to submit support request';
+      Alert.alert('Error', errMsg);
+    } finally {
+      setSubmittingSupport(false);
+    }
+  };
 
   useEffect(() => {
     loadUserProfile();
@@ -128,6 +246,41 @@ export default function ProfileScreen({ navigation }: Props) {
     );
   };
 
+  const handleDeleteAccount = async () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to delete your account? This action cannot be undone.\n\nYour personal data will be anonymized immediately. Financial records will be retained for 7 years for legal compliance.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await customerProfileApi.deleteAccount();
+              Alert.alert(
+                'Account Deleted',
+                response.message || 'Your account has been deleted.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: async () => {
+                      await authStorage.clearAuth();
+                      setIsAuthenticated(false);
+                    },
+                  },
+                ]
+              );
+            } catch (error: any) {
+              const errMsg = error.response?.data?.error || error.message || 'Failed to delete account';
+              Alert.alert('Error', errMsg);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const MenuItem = ({ icon, title, onPress, iconColor = '#444', showArrow = true }: any) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <View style={styles.menuIconContainer}>
@@ -151,6 +304,319 @@ export default function ProfileScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+
+      <Modal
+        visible={showEditModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowEditModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Manage Account</Text>
+                <Text style={styles.modalSubtitle}>
+                  Update your contact details below.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowEditModal(false)} style={styles.closeButton}>
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.inputCard}>
+                <Text style={styles.inputLabel}>Full Name</Text>
+                <TextInput
+                  value={editForm.name}
+                  onChangeText={(value) => setEditForm((current) => ({ ...current, name: value }))}
+                  placeholder="Enter your name"
+                  placeholderTextColor="#94A3B8"
+                  style={styles.input}
+                />
+              </View>
+
+              <View style={styles.inputCard}>
+                <Text style={styles.inputLabel}>Phone Number</Text>
+                <TextInput
+                  value={editForm.phone}
+                  onChangeText={(value) => setEditForm((current) => ({ ...current, phone: value.replace(/[^0-9]/g, '') }))}
+                  placeholder="Enter phone number"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  maxLength={15}
+                  style={styles.input}
+                />
+              </View>
+
+              <TouchableOpacity onPress={handleSaveProfile} disabled={submittingEdit} activeOpacity={0.92}>
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.primaryButton}>
+                  {submittingEdit ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryButtonText}>Save Details</Text>
+                      <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showSupportModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowSupportModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.supportHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Help & Support</Text>
+                <Text style={styles.modalSubtitle}>
+                  Contact us or submit a ticket below.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowSupportModal(false)} style={styles.closeButton}>
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Contact Channels */}
+              <View style={styles.contactRow}>
+                <TouchableOpacity onPress={handleContactWhatsApp} style={styles.contactButton}>
+                  <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+                  <Text style={styles.contactButtonText}>WhatsApp</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleContactEmail} style={styles.contactButton}>
+                  <Ionicons name="mail-outline" size={18} color="#EA4335" />
+                  <Text style={styles.contactButtonText}>Email</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleContactPhone} style={styles.contactButton}>
+                  <Ionicons name="call-outline" size={18} color="#0F172A" />
+                  <Text style={styles.contactButtonText}>Call Us</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Category Pills */}
+              <Text style={styles.categoryLabel}>Select Category</Text>
+              <View style={styles.categoryPills}>
+                {[
+                  { id: 'app_bug', label: 'Technical Issue' },
+                  { id: 'payment', label: 'Payments' },
+                  { id: 'pump', label: 'CNG Pump Info' },
+                  { id: 'referral', label: 'Refer & Earn' },
+                  { id: 'other', label: 'Other Feedback' },
+                ].map((cat) => {
+                  const isActive = supportForm.category === cat.id;
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      onPress={() => setSupportForm((current) => ({ ...current, category: cat.id }))}
+                      style={[styles.categoryPill, isActive && styles.categoryPillActive]}
+                    >
+                      <Text style={[styles.categoryPillText, isActive && styles.categoryPillTextActive]}>
+                        {cat.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Subject Input */}
+              <View style={styles.inputCard}>
+                <Text style={styles.inputLabel}>Subject</Text>
+                <TextInput
+                  value={supportForm.subject}
+                  onChangeText={(value) => setSupportForm((current) => ({ ...current, subject: value }))}
+                  placeholder="Summarize your issue"
+                  placeholderTextColor="#94A3B8"
+                  style={styles.input}
+                />
+              </View>
+
+              {/* Description Input */}
+              <View style={[styles.inputCard, { minHeight: 120 }]}>
+                <Text style={styles.inputLabel}>Description</Text>
+                <TextInput
+                  value={supportForm.description}
+                  onChangeText={(value) => setSupportForm((current) => ({ ...current, description: value }))}
+                  placeholder="Describe details of your request..."
+                  placeholderTextColor="#94A3B8"
+                  multiline
+                  numberOfLines={4}
+                  style={[styles.input, { textAlignVertical: 'top' }]}
+                />
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity onPress={handleSubmitSupport} disabled={submittingSupport} activeOpacity={0.92}>
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.primaryButton}>
+                  {submittingSupport ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryButtonText}>Submit Ticket</Text>
+                      <Ionicons name="send" size={16} color="#fff" />
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDataModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowDataModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.supportHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Your Data & Privacy</Text>
+                <Text style={styles.modalSubtitle}>
+                  Below is a summary of personal information we store.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowDataModal(false)} style={styles.closeButton}>
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.inputCard}>
+                <Text style={styles.inputLabel}>Profile Info</Text>
+                <Text style={[styles.dataText, { marginTop: 8 }]}>Name: {user?.name}</Text>
+                <Text style={styles.dataText}>Email: {user?.email}</Text>
+                <Text style={styles.dataText}>Phone: {user?.phone || 'Not provided'}</Text>
+              </View>
+
+              <View style={styles.inputCard}>
+                <Text style={styles.inputLabel}>Registered Vehicles</Text>
+                {user?.vehicles && user.vehicles.length > 0 ? (
+                  user.vehicles.map((v, i) => (
+                    <Text key={v.id} style={[styles.dataText, i === 0 && { marginTop: 8 }]}>
+                      • {v.plate}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={[styles.dataText, { marginTop: 8 }]}>No vehicles registered</Text>
+                )}
+              </View>
+
+              <View style={styles.inputCard}>
+                <Text style={styles.inputLabel}>Privacy Rights</Text>
+                <Text style={[styles.dataText, { marginTop: 8, lineHeight: 18 }]}>
+                  Your data is protected under CNG Bharat's strict privacy policy. You can request a copy of your records or permanently delete your account at any time.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Alert.alert(
+                    'Data Exported',
+                    JSON.stringify(
+                      {
+                        profile: {
+                          name: user?.name,
+                          email: user?.email,
+                          phone: user?.phone,
+                        },
+                        vehicles: user?.vehicles?.map((v) => v.plate) || [],
+                        timestamp: new Date().toISOString(),
+                      },
+                      null,
+                      2
+                    )
+                  );
+                }}
+                activeOpacity={0.92}
+              >
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.primaryButton}>
+                  <Text style={styles.primaryButtonText}>Download Data Summary</Text>
+                  <Ionicons name="download-outline" size={18} color="#fff" />
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showSettingsModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowSettingsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.supportHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Settings</Text>
+                <Text style={styles.modalSubtitle}>
+                  Configure your application preferences.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowSettingsModal(false)} style={styles.closeButton}>
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.inputCard}>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchCopy}>
+                    <Text style={styles.inputLabel}>Push Notifications</Text>
+                    <Text style={[styles.helperText, { color: colors.textSecondary }]}>
+                      Receive updates on queue times and new CNG stations.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settingsForm.notificationsEnabled}
+                    onValueChange={(value) => setSettingsForm((current) => ({ ...current, notificationsEnabled: value }))}
+                    trackColor={{ false: '#CBD5E1', true: '#A7F3D0' }}
+                    thumbColor={settingsForm.notificationsEnabled ? '#10B981' : '#94A3B8'}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputCard}>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchCopy}>
+                    <Text style={styles.inputLabel}>Location Tracking</Text>
+                    <Text style={[styles.helperText, { color: colors.textSecondary }]}>
+                      Permits showing nearby pumps on the home navigation screen.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settingsForm.locationTrackingEnabled}
+                    onValueChange={(value) => setSettingsForm((current) => ({ ...current, locationTrackingEnabled: value }))}
+                    trackColor={{ false: '#CBD5E1', true: '#A7F3D0' }}
+                    thumbColor={settingsForm.locationTrackingEnabled ? '#10B981' : '#94A3B8'}
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity onPress={() => setShowSettingsModal(false)} activeOpacity={0.92}>
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.primaryButton}>
+                  <Text style={styles.primaryButtonText}>Close Settings</Text>
+                  <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Header */}
       <View style={styles.header}>
@@ -178,7 +644,7 @@ export default function ProfileScreen({ navigation }: Props) {
 
           <Text style={styles.greeting}>Hi, {firstName}!</Text>
 
-          <TouchableOpacity style={styles.manageButton} onPress={() => Alert.alert('Edit Profile', 'Feature coming soon')}>
+          <TouchableOpacity style={styles.manageButton} onPress={handleOpenEditModal}>
             <Text style={styles.manageButtonText}>Manage your account</Text>
           </TouchableOpacity>
         </View>
@@ -275,7 +741,7 @@ export default function ProfileScreen({ navigation }: Props) {
             icon="shield-checkmark-outline"
             title="Your data in CNG Bharat"
             iconColor="#0EA5E9"
-            onPress={() => Alert.alert('Data Privacy', 'Coming soon')}
+            onPress={() => setShowDataModal(true)}
           />
         </View>
 
@@ -284,7 +750,7 @@ export default function ProfileScreen({ navigation }: Props) {
             icon="settings-outline"
             title="Settings"
             iconColor="#6B7280"
-            onPress={() => Alert.alert('Settings', 'Coming soon')}
+            onPress={() => setShowSettingsModal(true)}
           />
         </View>
 
@@ -293,7 +759,16 @@ export default function ProfileScreen({ navigation }: Props) {
             icon="help-circle-outline"
             title="Help & Support"
             iconColor="#8B5CF6"
-            onPress={() => Alert.alert('Help & Support', 'Coming soon')}
+            onPress={handleOpenSupport}
+          />
+        </View>
+
+        <View style={styles.menuCard}>
+          <MenuItem
+            icon="trash-outline"
+            title="Delete Account"
+            iconColor="#EF4444"
+            onPress={handleDeleteAccount}
           />
         </View>
 
@@ -471,5 +946,154 @@ const styles = StyleSheet.create({
   },
   bottomSpace: {
     height: 40,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.48)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    maxHeight: '88%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1F2937',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+    color: '#6B7280',
+  },
+  closeButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(148, 163, 184, 0.12)',
+  },
+  inputCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 14,
+    marginBottom: 16,
+    backgroundColor: '#F8FAFC',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  input: {
+    fontSize: 15,
+    marginTop: 10,
+    paddingVertical: 0,
+    color: '#1F2937',
+  },
+  primaryButton: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  supportHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    gap: 8,
+  },
+  contactButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F8FAFC',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  contactButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  categoryLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 8,
+  },
+  categoryPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  categoryPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  categoryPillActive: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderColor: '#10B981',
+  },
+  categoryPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  categoryPillTextActive: {
+    color: '#10B981',
+  },
+  dataText: {
+    fontSize: 14,
+    color: '#374151',
+    lineHeight: 20,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  switchCopy: {
+    flex: 1,
+  },
+  helperText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
   },
 });

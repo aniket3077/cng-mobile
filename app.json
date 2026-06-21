@@ -4,6 +4,7 @@
     "slug": "cngbharat",
     "version": "1.0.0",
     "orientation": "portrait",
+    "privacy": "public",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "automatic",
     "splash": {
@@ -13,7 +14,16 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cngbharat.app"
+      "bundleIdentifier": "com.cngbharat.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "We need your location to find nearby CNG stations",
+        "NSCameraUsageDescription": "We need camera access to update your profile picture",
+        "NSFaceIDUsageDescription": "We use Face ID to securely authenticate your account"
+      },
+      "config": {
+        "googleMapsApiKey": "REPLACE_WITH_IOS_RESTRICTED_KEY"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,11 +31,20 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.cngbharat.app",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ],
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyBu0svhEr_Y1OtNydq4FkAtiTGvWIwFHH4"
+          "apiKey": "REPLACE_WITH_ANDROID_RESTRICTED_KEY"
         }
-      }
+      },
+      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.cngbharat.app"
     },
     "web": {
       "favicon": "./assets/logo.png"

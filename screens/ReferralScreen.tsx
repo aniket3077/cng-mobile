@@ -123,23 +123,23 @@ interface ReferralDashboard {
 type HistoryFilter = 'all' | 'paid' | 'pending' | 'blocked';
 
 const lightPalette = {
-  bg: '#EEF4FF',
+  bg: '#FFFFFF',
   card: '#FFFFFF',
-  mutedCard: 'rgba(255,255,255,0.78)',
+  mutedCard: '#F8FAFC',
   text: '#0F172A',
   textSoft: '#475569',
-  border: 'rgba(148,163,184,0.22)',
-  hero: ['#050816', '#101C3C', '#173D78'] as const,
+  border: '#E2E8F0',
+  hero: ['#064E3B', '#047857', '#10B981'] as const,
 };
 
 const darkPalette = {
-  bg: '#030712',
-  card: '#0B1326',
-  mutedCard: 'rgba(11,19,38,0.84)',
-  text: '#F8FAFC',
-  textSoft: '#9FB0CB',
-  border: 'rgba(148,163,184,0.16)',
-  hero: ['#020617', '#07142C', '#123B7A'] as const,
+  bg: '#FFFFFF',
+  card: '#FFFFFF',
+  mutedCard: '#F8FAFC',
+  text: '#0F172A',
+  textSoft: '#475569',
+  border: '#E2E8F0',
+  hero: ['#064E3B', '#047857', '#10B981'] as const,
 };
 
 const historyFilters: HistoryFilter[] = ['all', 'paid', 'pending', 'blocked'];
@@ -448,7 +448,7 @@ export default function ReferralScreen({ navigation }: Props) {
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: palette.bg }]}>
-        <ActivityIndicator size="large" color="#60A5FA" />
+        <ActivityIndicator size="large" color="#10B981" />
         <Text style={[styles.loadingText, { color: palette.textSoft }]}>Preparing your commission dashboard…</Text>
       </View>
     );
@@ -520,14 +520,14 @@ export default function ReferralScreen({ navigation }: Props) {
                         style={[
                           styles.savedMethodCard,
                           {
-                            backgroundColor: isSelected ? 'rgba(96,165,250,0.14)' : palette.mutedCard,
-                            borderColor: isSelected ? '#60A5FA' : palette.border,
+                            backgroundColor: isSelected ? 'rgba(16,185,129,0.14)' : '#F8FAFC',
+                            borderColor: isSelected ? '#10B981' : '#E2E8F0',
                           },
                         ]}
                       >
                         <View style={styles.savedMethodCopy}>
-                          <Text style={[styles.savedMethodTitle, { color: palette.text }]}>{method.label}</Text>
-                          <Text style={[styles.savedMethodBody, { color: palette.textSoft }]}>
+                          <Text style={[styles.savedMethodTitle, { color: '#1E293B' }]}>{method.label}</Text>
+                          <Text style={[styles.savedMethodBody, { color: '#64748B' }]}>
                             {method.type === 'upi'
                               ? method.upiId
                               : `${method.accountNumberMasked || ''} ${method.ifsc || ''}`.trim()}
@@ -645,8 +645,8 @@ export default function ReferralScreen({ navigation }: Props) {
                   <Switch
                     value={withdrawForm.instantPayout}
                     onValueChange={(value) => setWithdrawForm((current) => ({ ...current, instantPayout: value }))}
-                    trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
-                    thumbColor={withdrawForm.instantPayout ? '#2563EB' : '#94A3B8'}
+                    trackColor={{ false: '#CBD5E1', true: '#A7F3D0' }}
+                    thumbColor={withdrawForm.instantPayout ? '#10B981' : '#94A3B8'}
                   />
                 </View>
               </View>
@@ -668,7 +668,7 @@ export default function ReferralScreen({ navigation }: Props) {
               </View>
 
               <TouchableOpacity onPress={handleSubmitWithdrawal} disabled={submittingPayout} activeOpacity={0.92}>
-                <LinearGradient colors={['#2563EB', '#7C3AED']} style={styles.primaryButton}>
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.primaryButton}>
                   {submittingPayout ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
@@ -876,7 +876,7 @@ export default function ReferralScreen({ navigation }: Props) {
               <View key={point.label} style={styles.graphColumn}>
                 <View style={styles.graphBarShell}>
                   <LinearGradient
-                    colors={['#2563EB', '#8B5CF6']}
+                    colors={['#10B981', '#34D399']}
                     style={[
                       styles.graphBar,
                       {
@@ -1102,7 +1102,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   retryButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#10B981',
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 14,
@@ -1137,7 +1137,7 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: 'rgba(96,165,250,0.22)',
+    backgroundColor: 'rgba(16,185,129,0.22)',
   },
   heroHeaderRow: {
     flexDirection: 'row',
@@ -1235,8 +1235,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   walletActionPrimary: {
-    backgroundColor: '#FDE68A',
-    borderColor: '#FDE68A',
+    backgroundColor: '#84CC16',
+    borderColor: '#84CC16',
   },
   walletActionText: {
     color: '#fff',
@@ -1298,24 +1298,24 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   referralCodeText: {
-    color: '#60A5FA',
+    color: '#10B981',
     fontSize: 18,
     fontWeight: '900',
     letterSpacing: 2,
   },
   deepLinkCard: {
     borderRadius: 18,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F1F5F9',
     padding: 14,
   },
   deepLinkLabel: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   deepLinkValue: {
-    color: '#E2E8F0',
+    color: '#0F172A',
     marginTop: 6,
     fontSize: 13,
   },
@@ -1333,7 +1333,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   applyButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#10B981',
     borderRadius: 16,
     paddingHorizontal: 18,
     alignItems: 'center',
@@ -1387,7 +1387,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2E8F0',
   },
   filterPillActive: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#10B981',
   },
   filterText: {
     color: '#334155',
@@ -1411,13 +1411,13 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#C7D2FE',
+    backgroundColor: '#D1FAE5',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   avatarText: {
-    color: '#312E81',
+    color: '#064E3B',
     fontWeight: '800',
   },
   historyCopy: {
@@ -1501,7 +1501,7 @@ const styles = StyleSheet.create({
   },
   planPreviewHighlight: {
     marginTop: 10,
-    color: '#2563EB',
+    color: '#10B981',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1583,7 +1583,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   defaultChip: {
-    color: '#2563EB',
+    color: '#10B981',
     fontSize: 11,
     fontWeight: '800',
   },
@@ -1600,7 +1600,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   togglePillActive: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#10B981',
   },
   toggleText: {
     color: '#334155',

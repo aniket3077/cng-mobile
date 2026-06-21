@@ -221,7 +221,6 @@ export default function RoutePlanModal({
                             !destinationCoords && styles.startButtonDisabled
                         ]}
                         onPress={() => {
-                            console.log('Start button pressed, destinationCoords:', destinationCoords);
                             onStartNavigation();
                         }}
                         disabled={!destinationCoords}
