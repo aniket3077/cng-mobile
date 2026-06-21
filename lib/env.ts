@@ -16,7 +16,7 @@ function normalizeApiUrl(value: string | undefined) {
 }
 
 function buildMobileEnv(): MobileEnv {
-  const apiUrl = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL) || 'https://cng-backend.vercel.app';
+  const apiUrl = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL) || 'https://api.cngbharat.com';
   const appEnv = (process.env.EXPO_PUBLIC_APP_ENV?.trim() || (__DEV__ ? 'development' : 'production')) as MobileEnv['appEnv'];
 
   // Defensive fallback to prevent immediate boot crash.
