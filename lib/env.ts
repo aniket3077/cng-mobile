@@ -16,12 +16,12 @@ function normalizeApiUrl(value: string | undefined) {
 }
 
 function buildMobileEnv(): MobileEnv {
-  const apiUrl = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL) || 'https://api.cngbharat.com';
+  const apiUrl = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL) || '';
   const appEnv = (process.env.EXPO_PUBLIC_APP_ENV?.trim() || (__DEV__ ? 'development' : 'production')) as MobileEnv['appEnv'];
 
-  // Defensive fallback to prevent immediate boot crash.
+  // Warn in dev if API URL is not configured.
   if (!process.env.EXPO_PUBLIC_API_URL && __DEV__) {
-    console.warn('Warning: EXPO_PUBLIC_API_URL is missing. Using fallback production Vercel backend.');
+    console.warn('Warning: EXPO_PUBLIC_API_URL is not set. API calls will fail.');
   }
 
   return {
