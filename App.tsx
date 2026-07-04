@@ -1,10 +1,12 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator, StyleSheet, Image, AppState } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Image, AppState, Linking } from 'react-native';
 import { AuthContext, useAuthContextValue } from './lib/authContext';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { appStorage } from './lib/appStorage';
 import { useAppStore } from './lib/store/appStore';
+import { storageKeys } from './lib/storageKeys';
 import { AppStackParamList } from './types/navigation';
 
 import SignupScreen from './screens/SignupScreen';
@@ -30,6 +32,31 @@ import { onLogout } from './lib/events';
 const AuthStack = createNativeStackNavigator<AppStackParamList>();
 const MainStack = createNativeStackNavigator<AppStackParamList>();
 const RootStack = createNativeStackNavigator<AppStackParamList>();
+
+function extractReferralCode(url: string | null | undefined) {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    const code = parsedUrl.searchParams.get('code')?.trim().toUpperCase();
+    const route = `${parsedUrl.hostname}${parsedUrl.pathname}`.toLowerCase();
+
+    if (!code || !route.includes('referral')) {
+      return null;
+    }
+
+    return code;
+  } catch {
+    const codeMatch = url.match(/[?&]code=([^&#]+)/i);
+    if (!codeMatch || !url.toLowerCase().includes('referral')) {
+      return null;
+    }
+
+    return decodeURIComponent(codeMatch[1]).trim().toUpperCase() || null;
+  }
+}
 
 function AuthNavigator() {
   return (
@@ -141,6 +168,25 @@ export default function App() {
 
     return () => subscription.remove();
   }, [isAuthenticated, refreshAccessState]);
+
+  useEffect(() => {
+    const persistReferralCode = async (url: string | null) => {
+      const referralCode = extractReferralCode(url);
+      if (referralCode) {
+        await appStorage.setItem(storageKeys.pendingReferralCode, referralCode);
+      }
+    };
+
+    void Linking.getInitialURL().then((url) => {
+      void persistReferralCode(url);
+    });
+
+    const subscription = Linking.addEventListener('url', (event) => {
+      void persistReferralCode(event.url);
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   if (bootStatus === 'loading' || isFirstLaunch === null) {
     return (

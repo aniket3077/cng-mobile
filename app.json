@@ -1,10 +1,10 @@
 {
   "expo": {
     "name": "CNG Bharat",
-    "slug": "cngbharat",
+    "slug": "cngbharat-mobile",
     "version": "1.0.0",
+    "scheme": "cngbharat",
     "orientation": "portrait",
-    "privacy": "public",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "automatic",
     "splash": {
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cngbharat.app",
+      "bundleIdentifier": "com.aniket3077.cngbharatmobile",
+      "associatedDomains": [
+        "applinks:cngbharat.com",
+        "applinks:*.cngbharat.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "We need your location to find nearby CNG stations",
@@ -22,7 +26,7 @@
         "NSFaceIDUsageDescription": "We use Face ID to securely authenticate your account"
       },
       "config": {
-        "googleMapsApiKey": "REPLACE_WITH_IOS_RESTRICTED_KEY"
+        "googleMapsApiKey": "AIzaSyBu0svhEr_Y1OtNydq4FkAtiTGvWIwFHH4"
       }
     },
     "android": {
@@ -30,8 +34,8 @@
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.cngbharat.app",
-      "versionCode": 1,
+      "package": "com.aniket3077.cngbharatmobile",
+      "versionCode": 11,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -41,19 +45,44 @@
       ],
       "config": {
         "googleMaps": {
-          "apiKey": "REPLACE_WITH_ANDROID_RESTRICTED_KEY"
+          "apiKey": "AIzaSyBu0svhEr_Y1OtNydq4FkAtiTGvWIwFHH4"
         }
       },
-      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.cngbharat.app"
+      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.aniket3077.cngbharatmobile",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "cngbharat.com",
+              "pathPrefix": "/"
+            },
+            {
+              "scheme": "https",
+              "host": "*.cngbharat.com",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/logo.png"
     },
     "extra": {
       "eas": {
-        "projectId": "e1459c8f-ab79-40a9-a1f5-349dcf243e11"
+        "projectId": "9c30abeb-648f-4229-a9d8-29c63213e823"
       }
     },
-    "owner": "aniket3077"
+    "owner": "aniket3077",
+    "plugins": [
+      "./plugins/withRemoveRazorpayAutoVerify"
+    ]
   }
 }

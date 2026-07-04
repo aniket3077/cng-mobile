@@ -18,11 +18,13 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius } from '../theme';
+import { appStorage } from '../lib/appStorage';
 import { authApi } from '../lib/api';
 import { authStorage } from '../lib/auth';
 import { useAuth } from '../lib/authContext';
 import { getDeviceFingerprint } from '../lib/deviceFingerprint';
 import { isValidIndianVehicleNumber, normalizeVehicleNumber } from '../lib/security';
+import { storageKeys } from '../lib/storageKeys';
 import { AppScreenProps } from '../types/navigation';
 
 const { width, height } = Dimensions.get('window');
@@ -69,6 +71,23 @@ export default function SignupScreen({ navigation }: Props) {
         useNativeDriver: true,
       }),
     ]).start();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadReferralCode = async () => {
+      const savedReferralCode = await appStorage.getItem(storageKeys.pendingReferralCode);
+      if (!cancelled && savedReferralCode && !referralCode.trim()) {
+        setReferralCode(savedReferralCode);
+      }
+    };
+
+    void loadReferralCode();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSignup = async () => {
@@ -145,6 +164,7 @@ export default function SignupScreen({ navigation }: Props) {
 
       await authStorage.saveSession(response.token, response.refreshToken);
       await authStorage.saveUser(response.user);
+      await appStorage.removeItem(storageKeys.pendingReferralCode);
       setIsAuthenticated(true);
     } catch (error: any) {
       let message = 'Signup failed. Please try again.';

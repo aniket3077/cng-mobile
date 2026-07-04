@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 5.2.0"
+    "version": ">= 20.3.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -14,23 +15,26 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.cngbharat.com",
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_SHOW_ONLY_GOOGLE_CNG": "true"
       }
     },
     "production": {
+      "autoIncrement": true,
       "android": {
-        "buildType": "aab"
+        "buildType": "app-bundle"
       },
-      "ios": {
-        "bundler": "metro"
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.cngbharat.com",
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_SHOW_ONLY_GOOGLE_CNG": "true"
       }
     }
   },
   "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./service-account-key.json",
-        "track": "internal"
-      }
-    }
+    "production": {}
   }
 }

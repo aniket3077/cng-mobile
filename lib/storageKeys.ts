@@ -6,5 +6,6 @@ export const storageKeys = {
   deviceFingerprint: 'cng_device_fingerprint',
   passwordResetSession: 'cng_password_reset_session',
   onboardingCompleted: 'cng_onboarding_completed',
+  pendingReferralCode: 'cng_pending_referral_code',
   stationCachePrefix: 'cng_station_cache',
 };
