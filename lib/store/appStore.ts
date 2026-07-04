@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { appStorage } from '../appStorage';
 import { authStorage } from '../auth';
-import { customerProfileApi } from '../api';
+import { authApi, customerProfileApi } from '../api';
 import { logger } from '../logger';
 import { storageKeys } from '../storageKeys';
 
@@ -49,6 +49,17 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     const authenticated = await authStorage.isAuthenticated();
 
     if (!authenticated) {
+      try {
+        const refreshedToken = await authApi.refreshToken();
+        if (refreshedToken) {
+          set({ isAuthenticated: true });
+          await get().refreshSubscription();
+          return;
+        }
+      } catch (error) {
+        logger.warn('Session refresh failed', error);
+      }
+
       set({
         isAuthenticated: false,
         hasSubscription: false,

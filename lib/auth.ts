@@ -89,15 +89,11 @@ export const authStorage = {
 
     const exp = decodeJwtExp(token);
     if (exp === null) {
-      // Malformed token — clear it and treat as logged out
-      await this.clearAuth();
       return false;
     }
 
     const nowSec = Date.now() / 1000;
     if (nowSec >= exp) {
-      // Token expired — clean up to avoid a stale state
-      await this.clearAuth();
       return false;
     }
 
