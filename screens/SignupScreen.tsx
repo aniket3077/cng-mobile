@@ -116,27 +116,11 @@ export default function SignupScreen({ navigation }: Props) {
       return;
     }
     if (!password) {
-      Alert.alert('Error', 'Please enter a password');
+      Alert.alert('Error', 'Please enter a 4-digit password');
       return;
     }
-    if (password.length < 12) {
-      Alert.alert('Error', 'Password must be at least 12 characters');
-      return;
-    }
-    if (!/[a-z]/.test(password)) {
-      Alert.alert('Error', 'Password must contain at least one lowercase letter');
-      return;
-    }
-    if (!/[A-Z]/.test(password)) {
-      Alert.alert('Error', 'Password must contain at least one uppercase letter');
-      return;
-    }
-    if (!/[0-9]/.test(password)) {
-      Alert.alert('Error', 'Password must contain at least one number');
-      return;
-    }
-    if (!/[^a-zA-Z0-9]/.test(password)) {
-      Alert.alert('Error', 'Password must contain at least one special character');
+    if (!/^\d{4}$/.test(password)) {
+      Alert.alert('Error', 'Password must be exactly 4 digits');
       return;
     }
     if (password !== confirmPassword) {
@@ -330,10 +314,12 @@ export default function SignupScreen({ navigation }: Props) {
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="Password (min 12 chars, mixed case, symbol)"
+                  placeholder="4-digit Password"
                   placeholderTextColor="#9CA3AF"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(text) => setPassword(text.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="numeric"
+                  maxLength={4}
                   secureTextEntry={!showPassword}
                   autoComplete="password-new"
                 />
@@ -356,10 +342,12 @@ export default function SignupScreen({ navigation }: Props) {
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="Confirm Password"
+                  placeholder="Confirm 4-digit Password"
                   placeholderTextColor="#9CA3AF"
                   value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  onChangeText={(text) => setConfirmPassword(text.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="numeric"
+                  maxLength={4}
                   secureTextEntry={!showConfirmPassword}
                   autoComplete="password-new"
                 />

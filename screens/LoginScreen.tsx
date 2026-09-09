@@ -67,7 +67,12 @@ export default function LoginScreen({ navigation }: Props) {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!normalizedEmail || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+      Alert.alert('Error', 'Please enter email and 4-digit password');
+      return;
+    }
+
+    if (password.length !== 4) {
+      Alert.alert('Error', 'Password must be exactly 4 digits');
       return;
     }
 
@@ -167,10 +172,12 @@ export default function LoginScreen({ navigation }: Props) {
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="Password"
+                  placeholder="4-digit Password"
                   placeholderTextColor="#9CA3AF"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(text) => setPassword(text.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="numeric"
+                  maxLength={4}
                   secureTextEntry={!showPassword}
                   autoComplete="password"
                 />

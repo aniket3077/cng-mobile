@@ -147,9 +147,11 @@ api.interceptors.response.use(
     }
 
     logger.warn('API request failed', {
-      status,
+      baseURL: error.config?.baseURL,
       url,
+      status,
       code: error.code,
+      message: error.message,
     });
     return Promise.reject(error);
   },

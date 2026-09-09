@@ -111,8 +111,13 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
       return;
     }
 
+    if (!/^\d{4}$/.test(newPassword)) {
+      Alert.alert('Invalid Password', 'Password must be exactly 4 digits.');
+      return;
+    }
+
     if (!passwordsMatch) {
-      Alert.alert('Passwords Do Not Match', 'Please confirm your new password.');
+      Alert.alert('Passwords Do Not Match', 'Please confirm your new 4-digit password.');
       return;
     }
 
@@ -237,10 +242,12 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="New Password"
+                  placeholder="New 4-digit Password"
                   placeholderTextColor="#9CA3AF"
                   value={newPassword}
-                  onChangeText={setNewPassword}
+                  onChangeText={(text) => setNewPassword(text.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="numeric"
+                  maxLength={4}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -265,10 +272,12 @@ export default function ResetPasswordScreen({ navigation, route }: Props) {
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="Confirm New Password"
+                  placeholder="Confirm 4-digit Password"
                   placeholderTextColor="#9CA3AF"
                   value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  onChangeText={(text) => setConfirmPassword(text.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="numeric"
+                  maxLength={4}
                   secureTextEntry={!showConfirmPassword}
                   autoCapitalize="none"
                   autoCorrect={false}

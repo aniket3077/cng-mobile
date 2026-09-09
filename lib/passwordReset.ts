@@ -84,31 +84,22 @@ export function formatTimer(totalSeconds: number) {
 export function getPasswordStrength(password: string): PasswordStrengthState {
   const rules: PasswordRule[] = [
     {
-      label: 'At least 8 characters',
-      met: password.length >= 8,
+      label: 'Exactly 4 digits',
+      met: /^\d{4}$/.test(password),
     },
     {
-      label: 'One uppercase letter',
-      met: /[A-Z]/.test(password),
-    },
-    {
-      label: 'One lowercase letter',
-      met: /[a-z]/.test(password),
-    },
-    {
-      label: 'One number',
-      met: /\d/.test(password),
+      label: 'Only numbers (0-9)',
+      met: /^\d+$/.test(password) && password.length > 0,
     },
   ];
 
-  const completedRules = rules.filter((rule) => rule.met).length;
-  const isValid = rules.every((rule) => rule.met);
+  const isValid = /^\d{4}$/.test(password);
 
   if (!password.length) {
     return {
       color: '#9CA3AF',
       isValid: false,
-      label: 'Add a stronger password',
+      label: 'Enter 4-digit password',
       rules,
     };
   }
@@ -116,25 +107,16 @@ export function getPasswordStrength(password: string): PasswordStrengthState {
   if (isValid) {
     return {
       color: '#059669',
-      isValid,
-      label: 'Strong password',
-      rules,
-    };
-  }
-
-  if (completedRules >= 3) {
-    return {
-      color: '#D97706',
-      isValid,
-      label: 'Almost there',
+      isValid: true,
+      label: 'Valid 4-digit password',
       rules,
     };
   }
 
   return {
     color: '#DC2626',
-    isValid,
-    label: 'Weak password',
+    isValid: false,
+    label: `${password.length}/4 digits`,
     rules,
   };
 }

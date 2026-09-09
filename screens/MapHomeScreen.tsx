@@ -830,8 +830,8 @@ export default function MapHomeScreen({ navigation, route }: Props) {
           showsUserLocation
           showsMyLocationButton={false}
           showsCompass
-          showsPointsOfInterest={false}
-          showsBuildings={false}
+          showsPointsOfInterests={false}
+          showsBuildings={true}
           customMapStyle={mapType === 'standard' ? LIGHT_MAP_STYLE : undefined}
           loadingEnabled
           toolbarEnabled={false}
@@ -1489,7 +1489,7 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',

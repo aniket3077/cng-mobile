@@ -7,11 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
+
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.aniket3077.cngbharatmobile",
@@ -82,7 +78,18 @@
     },
     "owner": "aniket3077",
     "plugins": [
-      "./plugins/withRemoveRazorpayAutoVerify"
+      "./plugins/withRemoveRazorpayAutoVerify",
+      "expo-build-properties",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/logo.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
     ]
   }
 }

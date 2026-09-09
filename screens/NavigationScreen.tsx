@@ -248,8 +248,8 @@ export default function NavigationScreen({ navigation, route }: Props) {
         showsUserLocation
         showsMyLocationButton={false}
         followsUserLocation
-        showsPointsOfInterest={false}
-        showsBuildings={false}
+        showsPointsOfInterests={false}
+        showsBuildings={true}
         customMapStyle={LIGHT_MAP_STYLE}
         loadingEnabled
       >

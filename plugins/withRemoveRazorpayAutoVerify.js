@@ -1,4 +1,4 @@
-const { withAndroidManifest } = require('@expo/config-plugins');
+const { withAndroidManifest } = require('expo/config-plugins');
 
 /**
  * Expo Config Plugin to remove 'android:autoVerify="true"' from Razorpay's DeepLinkActivity.

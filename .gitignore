@@ -8,21 +8,35 @@ dist/
 web-build/
 
 # Native
-/android
 /ios
 *.orig.*
 *.jks
+*.keystore
+!android/app/debug.keystore
 *.p8
 *.p12
 *.key
+*.pem
 *.mobileprovision
-*.orig.*
 *.ipa
 *.apk
+*.aab
+*service-account*.json
+*service_account*.json
+
+# Android build outputs and local config
+android/.gradle/
+android/build/
+android/app/build/
+android/.cxx/
+android/local.properties
+android/.kotlin/
 
 # Environment
 .env
-.env.local
+.env.*
+!.env.example
+
 
 # Misc
 .DS_Store
