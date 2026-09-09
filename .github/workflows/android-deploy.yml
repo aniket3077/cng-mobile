@@ -98,7 +98,7 @@ jobs:
           retention-days: 14
 
       - name: Deploy to Google Play Console (Internal Testing Track)
-        uses: rslnk/upload-google-play@v1
+        uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.aniket3077.cngbharatmobile
