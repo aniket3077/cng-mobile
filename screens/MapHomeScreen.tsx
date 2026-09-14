@@ -11,18 +11,22 @@ import {
   Image,
   Animated,
   Easing,
+  ScrollView,
+  Keyboard,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { placesApi, routePlanningApi, stationsApi, nearbyStationsApi, customerProfileApi } from '../lib/api';
+import { authStorage } from '../lib/auth';
 import RoutePlanModal from '../components/RoutePlanModal';
 import { logger } from '../lib/logger';
 import { colors, spacing } from '../theme';
 import { AppScreenProps } from '../types/navigation';
 import { decodePolyline } from '../utils/mapHelpers';
 import { LIGHT_MAP_STYLE } from '../utils/mapStyle';
+import { isLikelyCngStation, hasCngFuel } from '../utils/cngDetector';
 
 interface Station {
   id: string;
@@ -36,26 +40,88 @@ interface Station {
   phone?: string;
   openingHours?: string;
   isPartner: boolean;
+  rating?: number;
+  totalReviews?: number;
   cngAvailable?: boolean;
   cngQuantityKg?: number | null;
+  cngStatusUpdatedAt?: string | null;
+  cngStatusUpdatedBy?: string | null;
+  cngPressure?: string | null;
+  cngPressureUpdatedAt?: string | null;
+  cngPressureUpdatedBy?: string | null;
   crowdLevel?: 'low' | 'medium' | 'high';
   crowdCount?: number;
   estimatedWaitTime?: number;
+  crowdUpdatedAt?: string | null;
+  crowdUpdatedBy?: string | null;
 }
 
+const formatUpdatedTime = (dateString?: string | null) => {
+  if (!dateString) {
+    return { timeStr: 'Not updated yet', relativeStr: '' };
+  }
+  try {
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) {
+      return { timeStr: 'Not updated yet', relativeStr: '' };
+    }
+
+    let hours = d.getHours();
+    const minutes = d.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const hoursStr = hours.toString().padStart(2, '0');
+
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    const timeStr = `${hoursStr}:${minutes} ${ampm} ${day}/${month}/${year}`;
+
+    const diffMs = Date.now() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    let relativeStr = '';
+    if (diffMins < 1) {
+      relativeStr = '(Just now)';
+    } else if (diffMins < 60) {
+      relativeStr = `(${diffMins} min${diffMins > 1 ? 's' : ''} ago)`;
+    } else if (diffHours < 24) {
+      relativeStr = `(${diffHours} hr${diffHours > 1 ? 's' : ''} ago)`;
+    } else {
+      relativeStr = `(${diffDays} day${diffDays > 1 ? 's' : ''} ago)`;
+    }
+
+    return { timeStr, relativeStr };
+  } catch {
+    return { timeStr: 'Recently', relativeStr: '' };
+  }
+};
+
 const normalizeGoogleNearbyStations = (items: any[]): Station[] => {
-  return items.map((item: any) => ({
-    id: item.placeId || `${item.coordinates?.lat}-${item.coordinates?.lng}`,
-    name: item.name || 'CNG Station',
-    address: item.address || '',
-    city: '',
-    state: '',
-    lat: item.coordinates?.lat,
-    lng: item.coordinates?.lng,
-    fuelTypes: 'CNG',
-    isPartner: false,
-    cngAvailable: item.openNow ?? undefined,
-  })).filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number');
+  return items
+    .filter((item: any) => {
+      // Must have valid coordinates
+      if (typeof item.coordinates?.lat !== 'number' || typeof item.coordinates?.lng !== 'number') {
+        return false;
+      }
+      // Must be a verified/likely CNG station, filtering out pure petrol/diesel pumps
+      return isLikelyCngStation(item.name, item.address);
+    })
+    .map((item: any) => ({
+      id: item.placeId || `${item.coordinates?.lat}-${item.coordinates?.lng}`,
+      name: item.name || 'CNG Station',
+      address: item.address || '',
+      city: '',
+      state: '',
+      lat: item.coordinates?.lat,
+      lng: item.coordinates?.lng,
+      fuelTypes: item.fuelTypes || 'CNG',
+      isPartner: false,
+      cngAvailable: item.openNow ?? undefined,
+    }));
 };
 
 type Props = AppScreenProps<'MapHome'>;
@@ -68,6 +134,9 @@ export default function MapHomeScreen({ navigation, route }: Props) {
   const [selectedStation, setSelectedStation] = useState<Station | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [region, setRegion] = useState<Region | null>(null);
   const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
   const [isMapReady, setIsMapReady] = useState(false);
@@ -92,6 +161,149 @@ export default function MapHomeScreen({ navigation, route }: Props) {
   const [isNavigating, setIsNavigating] = useState(false);
   const [navigationStation, setNavigationStation] = useState<Station | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [updatingField, setUpdatingField] = useState<'status' | 'pressure' | 'crowd' | null>(null);
+
+  const handleUpdateStatus = async (available: boolean) => {
+    if (!selectedStation) return;
+
+    try {
+      setUpdatingField('status');
+      const user = await authStorage.getUser();
+      const userName = user?.name || user?.email?.split('@')[0] || 'You';
+      const nowIso = new Date().toISOString();
+
+      const updatedStation: Station = {
+        ...selectedStation,
+        cngAvailable: available,
+        cngStatusUpdatedAt: nowIso,
+        cngStatusUpdatedBy: userName,
+      };
+
+      setSelectedStation(updatedStation);
+      setStations((prev) =>
+        prev.map((s) => (s.id === selectedStation.id ? { ...s, ...updatedStation } : s))
+      );
+      setAllStations((prev) =>
+        prev.map((s) => (s.id === selectedStation.id ? { ...s, ...updatedStation } : s))
+      );
+
+      await stationsApi.updateStatus(selectedStation.id, {
+        cngAvailable: available,
+        stationName: selectedStation.name,
+        address: selectedStation.address,
+        city: selectedStation.city,
+        state: selectedStation.state,
+        lat: selectedStation.lat,
+        lng: selectedStation.lng,
+      });
+
+      Alert.alert(
+        'Status Updated',
+        `Station marked as ${available ? 'Available' : 'Not Available'}. Thank you!`
+      );
+    } catch (error) {
+      logger.warn('Failed to update station status', error);
+      Alert.alert('Notice', 'Status updated locally. Please login to sync community updates.');
+    } finally {
+      setUpdatingField(null);
+    }
+  };
+
+  const handleUpdatePressure = async (pressure: string) => {
+    if (!selectedStation) return;
+
+    try {
+      setUpdatingField('pressure');
+      const user = await authStorage.getUser();
+      const userName = user?.name || user?.email?.split('@')[0] || 'You';
+      const nowIso = new Date().toISOString();
+
+      const updatedStation: Station = {
+        ...selectedStation,
+        cngPressure: pressure,
+        cngPressureUpdatedAt: nowIso,
+        cngPressureUpdatedBy: userName,
+      };
+
+      setSelectedStation(updatedStation);
+      setStations((prev) =>
+        prev.map((s) => (s.id === selectedStation.id ? { ...s, ...updatedStation } : s))
+      );
+      setAllStations((prev) =>
+        prev.map((s) => (s.id === selectedStation.id ? { ...s, ...updatedStation } : s))
+      );
+
+      await stationsApi.updatePressure(selectedStation.id, {
+        cngPressure: pressure,
+        stationName: selectedStation.name,
+        address: selectedStation.address,
+        city: selectedStation.city,
+        state: selectedStation.state,
+        lat: selectedStation.lat,
+        lng: selectedStation.lng,
+      });
+
+      Alert.alert('Pressure Updated', `Dispenser pressure updated to ${pressure}. Thank you!`);
+    } catch (error) {
+      logger.warn('Failed to update station pressure', error);
+      Alert.alert('Notice', 'Pressure updated locally. Please login to sync community updates.');
+    } finally {
+      setUpdatingField(null);
+    }
+  };
+
+  const handleUpdateCrowd = async (level: 'low' | 'medium' | 'high') => {
+    if (!selectedStation) return;
+
+    try {
+      setUpdatingField('crowd');
+      const user = await authStorage.getUser();
+      const userName = user?.name || user?.email?.split('@')[0] || 'You';
+      const nowIso = new Date().toISOString();
+
+      const waitTimeMap: Record<'low' | 'medium' | 'high', number> = {
+        low: 5,
+        medium: 15,
+        high: 30,
+      };
+
+      const updatedStation: Station = {
+        ...selectedStation,
+        crowdLevel: level,
+        estimatedWaitTime: waitTimeMap[level],
+        crowdUpdatedAt: nowIso,
+        crowdUpdatedBy: userName,
+      };
+
+      setSelectedStation(updatedStation);
+      setStations((prev) =>
+        prev.map((s) => (s.id === selectedStation.id ? { ...s, ...updatedStation } : s))
+      );
+      setAllStations((prev) =>
+        prev.map((s) => (s.id === selectedStation.id ? { ...s, ...updatedStation } : s))
+      );
+
+      await stationsApi.updateCrowd(selectedStation.id, {
+        crowdLevel: level,
+        stationName: selectedStation.name,
+        address: selectedStation.address,
+        city: selectedStation.city,
+        state: selectedStation.state,
+        lat: selectedStation.lat,
+        lng: selectedStation.lng,
+      });
+
+      Alert.alert(
+        'Crowd Status Updated',
+        `Crowd level marked as ${level.toUpperCase()} (~${waitTimeMap[level]} min wait). Thank you!`
+      );
+    } catch (error) {
+      logger.warn('Failed to update crowd level', error);
+      Alert.alert('Notice', 'Crowd updated locally. Please login to sync community updates.');
+    } finally {
+      setUpdatingField(null);
+    }
+  };
 
   const mapRef = useRef<MapView>(null);
 
@@ -277,11 +489,6 @@ export default function MapHomeScreen({ navigation, route }: Props) {
         setProfileImage(savedImage);
       }
     } catch (_error) {}
-  };
-
-  const handleClearSearch = () => {
-    setSearchQuery('');
-    setStations(allStations);
   };
 
   const searchPlaces = async (input: string) => {
@@ -536,6 +743,7 @@ export default function MapHomeScreen({ navigation, route }: Props) {
           lat,
           lng,
           radius,
+          fuelType: 'CNG',
         })
       ]);
 
@@ -591,11 +799,131 @@ export default function MapHomeScreen({ navigation, route }: Props) {
     }
   };
 
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setStations(allStations);
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setSearchSuggestions([]);
+    setShowSearchSuggestions(false);
+    setStations(allStations);
+  };
+
+  const handleSearchTextChange = (text: string) => {
+    setSearchQuery(text);
+
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
     }
-  }, [searchQuery, allStations]);
+
+    if (!text.trim() || text.trim().length < 2) {
+      setSearchSuggestions([]);
+      setShowSearchSuggestions(false);
+      setStations(allStations);
+      return;
+    }
+
+    setShowSearchSuggestions(true);
+
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        // 1. Check local stations matching
+        const localMatches = allStations
+          .filter(
+            (s) =>
+              s.name.toLowerCase().includes(text.toLowerCase()) ||
+              s.city.toLowerCase().includes(text.toLowerCase()) ||
+              s.address.toLowerCase().includes(text.toLowerCase())
+          )
+          .slice(0, 3)
+          .map((s) => ({
+            id: s.id,
+            place_id: s.id,
+            isLocalStation: true,
+            stationData: s,
+            description: `${s.name}, ${s.address || s.city}`,
+            structured_formatting: {
+              main_text: s.name,
+              secondary_text: s.address || s.city,
+            },
+          }));
+
+        // 2. Google Places predictions
+        const predictions = await searchPlaces(text.trim());
+        const googleMatches = (predictions || []).slice(0, 5).map((p: any) => ({
+          ...p,
+          isLocalStation: false,
+        }));
+
+        setSearchSuggestions([...localMatches, ...googleMatches]);
+      } catch (error) {
+        logger.warn('Search autocomplete error', error);
+      }
+    }, 300);
+  };
+
+  const handleSelectSearchSuggestion = async (suggestion: any) => {
+    Keyboard.dismiss();
+    setShowSearchSuggestions(false);
+    setSearchQuery(suggestion.structured_formatting?.main_text || suggestion.description || '');
+
+    if (suggestion.isLocalStation && suggestion.stationData) {
+      const s = suggestion.stationData;
+      setSelectedStation(s);
+      if (mapRef.current && isMapReady) {
+        mapRef.current.animateToRegion({
+          latitude: s.lat,
+          longitude: s.lng,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        });
+      }
+      return;
+    }
+
+    // Google Place suggestion
+    try {
+      setLoading(true);
+      const details = await placesApi.getDetails(suggestion.place_id);
+      const coords = details?.location;
+
+      if (coords?.lat && coords?.lng) {
+        const isCng = isLikelyCngStation(suggestion.description || '', '');
+
+        if (mapRef.current && isMapReady) {
+          mapRef.current.animateToRegion({
+            latitude: coords.lat,
+            longitude: coords.lng,
+            latitudeDelta: 0.05,
+            longitudeDelta: 0.05,
+          });
+        }
+
+        // Fetch stations around this searched location
+        await fetchNearbyStations(coords.lat, coords.lng, 15);
+
+        if (isCng) {
+          setSelectedStation({
+            id: suggestion.place_id,
+            name:
+              suggestion.structured_formatting?.main_text ||
+              suggestion.description ||
+              'CNG Station',
+            address: details.formattedAddress || suggestion.description || '',
+            city: '',
+            state: '',
+            lat: coords.lat,
+            lng: coords.lng,
+            fuelTypes: 'CNG',
+            isPartner: false,
+            cngAvailable: true,
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn('Failed to get place details', e);
+      Alert.alert('Search Error', 'Could not locate the selected place');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -603,7 +931,10 @@ export default function MapHomeScreen({ navigation, route }: Props) {
       return;
     }
 
-    // Simple search implementation - you can enhance with Google Places API
+    Keyboard.dismiss();
+    setShowSearchSuggestions(false);
+
+    // 1. Check local stations
     const filtered = allStations.filter(
       (s) =>
         s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -613,18 +944,49 @@ export default function MapHomeScreen({ navigation, route }: Props) {
 
     if (filtered.length > 0) {
       setStations(filtered);
-      // Center map on first result
       const station = filtered[0];
+      setSelectedStation(station);
       if (mapRef.current && isMapReady) {
         mapRef.current.animateToRegion({
           latitude: station.lat,
           longitude: station.lng,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
+          latitudeDelta: 0.03,
+          longitudeDelta: 0.03,
         });
       }
-    } else {
-      Alert.alert('No Results', 'No stations found matching your search');
+      return;
+    }
+
+    // 2. Search via Google Places
+    try {
+      setLoading(true);
+      const predictions = await searchPlaces(searchQuery.trim());
+      if (predictions && predictions.length > 0) {
+        const topResult = predictions[0];
+        const details = await placesApi.getDetails(topResult.place_id);
+        const coords = details?.location;
+
+        if (coords?.lat && coords?.lng) {
+          if (mapRef.current && isMapReady) {
+            mapRef.current.animateToRegion({
+              latitude: coords.lat,
+              longitude: coords.lng,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            });
+          }
+
+          await fetchNearbyStations(coords.lat, coords.lng, 15);
+          return;
+        }
+      }
+
+      Alert.alert('No Results', 'No stations or places found matching your search');
+    } catch (e) {
+      logger.warn('Search failed', e);
+      Alert.alert('Error', 'Search failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -915,7 +1277,7 @@ export default function MapHomeScreen({ navigation, route }: Props) {
               placeholder="Search for CNG station or place..."
               placeholderTextColor={colors.textSecondary}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearchTextChange}
               onSubmitEditing={handleSearch}
               returnKeyType="search"
             />
@@ -943,6 +1305,43 @@ export default function MapHomeScreen({ navigation, route }: Props) {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Live Search Suggestions Dropdown */}
+        {showSearchSuggestions && searchSuggestions.length > 0 && (
+          <View style={styles.suggestionsDropdown}>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
+              style={{ maxHeight: 240 }}
+            >
+              {searchSuggestions.map((item, index) => (
+                <TouchableOpacity
+                  key={`${item.place_id || item.id || index}`}
+                  style={styles.suggestionItem}
+                  onPress={() => handleSelectSearchSuggestion(item)}
+                >
+                  <View style={styles.suggestionIconContainer}>
+                    {item.isLocalStation ? (
+                      <MaterialCommunityIcons name="gas-station" size={20} color={colors.primary} />
+                    ) : (
+                      <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                    )}
+                  </View>
+                  <View style={styles.suggestionTextContainer}>
+                    <Text style={styles.suggestionMainText} numberOfLines={1}>
+                      {item.structured_formatting?.main_text || item.description || ''}
+                    </Text>
+                    {item.structured_formatting?.secondary_text ? (
+                      <Text style={styles.suggestionSecondaryText} numberOfLines={1}>
+                        {item.structured_formatting.secondary_text}
+                      </Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </View>
 
       {/* Map Layer Button */}
@@ -998,7 +1397,12 @@ export default function MapHomeScreen({ navigation, route }: Props) {
             <Ionicons name="close" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
 
-          <View style={styles.sheetContent}>
+          <ScrollView
+            style={styles.sheetScrollView}
+            contentContainerStyle={styles.sheetContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Station Title */}
             <View style={styles.sheetHeader}>
               <Text style={styles.stationName}>{selectedStation.name}</Text>
               {selectedStation.isPartner && (
@@ -1008,103 +1412,286 @@ export default function MapHomeScreen({ navigation, route }: Props) {
               )}
             </View>
 
-            <View style={styles.detailRow}>
-              <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>
-                {selectedStation.address}, {selectedStation.city}
+            {/* Rating & Reviews */}
+            <View style={styles.ratingRow}>
+              <Ionicons name="star" size={16} color="#F59E0B" />
+              <Text style={styles.ratingText}>
+                {selectedStation.rating ? selectedStation.rating.toFixed(1) : '4.5'}{' '}
+                {selectedStation.totalReviews && selectedStation.totalReviews > 0
+                  ? `${selectedStation.totalReviews} Reviews`
+                  : 'No Reviews Yet'}
               </Text>
             </View>
 
-            {selectedStation.phone && (
-              <View style={styles.detailRow}>
-                <Ionicons name="call-outline" size={16} color={colors.textSecondary} />
-                <Text style={styles.detailText}>{selectedStation.phone}</Text>
-              </View>
-            )}
+            {/* Address */}
+            <View style={styles.addressRow}>
+              <Ionicons name="location-sharp" size={16} color="#6B7280" />
+              <Text style={styles.addressText}>
+                {selectedStation.address || 'Address not available'}
+                {selectedStation.city ? `, ${selectedStation.city}` : ''}
+              </Text>
+            </View>
 
-            {selectedStation.openingHours && (
-              <View style={styles.detailRow}>
-                <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
-                <Text style={styles.detailText}>{selectedStation.openingHours}</Text>
+            {/* Gas Status & Pressure summary tags */}
+            <View style={styles.summaryTagRow}>
+              <View style={styles.summaryTag}>
+                <MaterialCommunityIcons
+                  name="gas-station"
+                  size={16}
+                  color={selectedStation.cngAvailable === false ? '#EF4444' : '#10B981'}
+                />
+                <Text
+                  style={[
+                    styles.summaryTagText,
+                    { color: selectedStation.cngAvailable === false ? '#EF4444' : '#10B981' },
+                  ]}
+                >
+                  {selectedStation.cngAvailable === false ? 'Gas Unavailable' : 'Gas Available'}
+                </Text>
               </View>
-            )}
 
-            {/* Crowd Level Information */}
-            {selectedStation.crowdLevel && (
-              <View style={[styles.detailRow, styles.crowdDetailRow]}>
-                <Ionicons name="people-outline" size={16} color={colors.textSecondary} />
-                <View style={{ flex: 1 }}>
-                  <View style={styles.crowdLevelContainer}>
-                    <View
-                      style={[
-                        styles.crowdLevelIndicator,
-                        { backgroundColor: getCrowdIndicator(selectedStation.crowdLevel).color }
-                      ]}
-                    />
-                    <Text style={styles.detailText}>
-                      Crowd Level: {getCrowdIndicator(selectedStation.crowdLevel).label}
-                    </Text>
-                  </View>
-                  {selectedStation.crowdCount !== undefined && (
-                    <Text style={styles.crowdCountText}>
-                      {selectedStation.crowdCount} vehicles currently waiting
-                    </Text>
-                  )}
-                  {selectedStation.estimatedWaitTime !== undefined && (
-                    <Text style={styles.estimatedWaitText}>
-                      Est. Wait Time: ~{selectedStation.estimatedWaitTime} min
-                    </Text>
-                  )}
-                </View>
+              <View style={[styles.summaryTag, { marginLeft: 12 }]}>
+                <Ionicons name="speedometer-outline" size={16} color="#6B7280" />
+                <Text style={styles.summaryTagTextSecondary}>
+                  {selectedStation.cngPressure || '200 - 210'}
+                </Text>
               </View>
-            )}
 
-            <View style={styles.detailRow}>
-              <MaterialCommunityIcons name="gas-cylinder" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>CNG Status:</Text>
-              <View
-                style={[
-                  styles.cngStatusBadge,
-                  {
-                    backgroundColor:
-                      selectedStation.cngAvailable === false
-                        ? colors.danger
-                        : selectedStation.cngAvailable === true
-                          ? colors.accent
-                          : colors.secondary,
-                  },
-                ]}
-              >
-                <Text style={styles.cngStatusText}>
-                  {selectedStation.cngAvailable === false
-                    ? 'Unavailable'
-                    : selectedStation.cngAvailable === true
-                      ? 'Available'
-                      : 'Unknown'}
-                  {selectedStation.cngAvailable === true &&
-                    typeof selectedStation.cngQuantityKg === 'number'
-                    ? ` (${selectedStation.cngQuantityKg} kg)`
-                    : ''}
+              <View style={[styles.summaryTag, { marginLeft: 12 }]}>
+                <Ionicons
+                  name={getCrowdIndicator(selectedStation.crowdLevel).icon as any}
+                  size={16}
+                  color={getCrowdIndicator(selectedStation.crowdLevel).color}
+                />
+                <Text
+                  style={[
+                    styles.summaryTagTextSecondary,
+                    { color: getCrowdIndicator(selectedStation.crowdLevel).color },
+                  ]}
+                >
+                  {getCrowdIndicator(selectedStation.crowdLevel).label}
+                  {selectedStation.estimatedWaitTime ? ` (~${selectedStation.estimatedWaitTime}m)` : ''}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.fuelTypes}>
-              <Text style={styles.fuelTypeLabel}>Available Fuel:</Text>
-              <Text style={styles.fuelTypeText}>{selectedStation.fuelTypes}</Text>
+            {/* Update Station Status Section */}
+            <View style={styles.updateCard}>
+              <View style={styles.updateCardHeader}>
+                <Text style={styles.updateCardTitle}>Update Station Status</Text>
+                <View style={styles.updateCardTimeContainer}>
+                  <Text style={styles.updateTimeLabel}>Last Updated At</Text>
+                  <Text style={styles.updateTimeValue}>
+                    {formatUpdatedTime(selectedStation.cngStatusUpdatedAt).timeStr}
+                  </Text>
+                  {formatUpdatedTime(selectedStation.cngStatusUpdatedAt).relativeStr ? (
+                    <Text style={styles.updateTimeRelative}>
+                      {formatUpdatedTime(selectedStation.cngStatusUpdatedAt).relativeStr}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+
+              <View style={styles.statusButtonsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    selectedStation.cngAvailable !== false
+                      ? styles.statusButtonActive
+                      : styles.statusButtonInactive,
+                  ]}
+                  onPress={() => handleUpdateStatus(true)}
+                  disabled={updatingField === 'status'}
+                >
+                  <Ionicons
+                    name="checkmark"
+                    size={18}
+                    color={selectedStation.cngAvailable !== false ? '#FFFFFF' : '#65A30D'}
+                  />
+                  <Text
+                    style={[
+                      styles.statusButtonText,
+                      selectedStation.cngAvailable !== false
+                        ? styles.statusButtonTextActive
+                        : styles.statusButtonTextInactive,
+                    ]}
+                  >
+                    Available
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    selectedStation.cngAvailable === false
+                      ? styles.statusButtonActive
+                      : styles.statusButtonInactive,
+                  ]}
+                  onPress={() => handleUpdateStatus(false)}
+                  disabled={updatingField === 'status'}
+                >
+                  <Ionicons
+                    name="close"
+                    size={18}
+                    color={selectedStation.cngAvailable === false ? '#FFFFFF' : '#65A30D'}
+                  />
+                  <Text
+                    style={[
+                      styles.statusButtonText,
+                      selectedStation.cngAvailable === false
+                        ? styles.statusButtonTextActive
+                        : styles.statusButtonTextInactive,
+                    ]}
+                  >
+                    Not Available
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.updatedByText}>
+                Last Station Status have been updated by{' '}
+                <Text style={styles.updatedByHighlight}>
+                  {selectedStation.cngStatusUpdatedBy || 'Amit'}
+                </Text>
+              </Text>
             </View>
 
+            {/* Update Station Pressure Section */}
+            <View style={styles.updateCard}>
+              <View style={styles.updateCardHeader}>
+                <Text style={styles.updateCardTitle}>Update Station Pressure</Text>
+                <View style={styles.updateCardTimeContainer}>
+                  <Text style={styles.updateTimeLabel}>Last Updated At</Text>
+                  <Text style={styles.updateTimeValue}>
+                    {formatUpdatedTime(selectedStation.cngPressureUpdatedAt).timeStr}
+                  </Text>
+                  {formatUpdatedTime(selectedStation.cngPressureUpdatedAt).relativeStr ? (
+                    <Text style={styles.updateTimeRelative}>
+                      {formatUpdatedTime(selectedStation.cngPressureUpdatedAt).relativeStr}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+
+              {/* Pressure Chips Grid */}
+              <View style={styles.pressureChipsContainer}>
+                {['Low', '180 - 190', '190 - 200', '200 - 210', '210 - 220'].map((val) => {
+                  const isSelected = (selectedStation.cngPressure || '200 - 210') === val;
+                  return (
+                    <TouchableOpacity
+                      key={val}
+                      style={[
+                        styles.pressureChip,
+                        isSelected ? styles.pressureChipActive : styles.pressureChipInactive,
+                      ]}
+                      onPress={() => handleUpdatePressure(val)}
+                      disabled={updatingField === 'pressure'}
+                    >
+                      <Text
+                        style={[
+                          styles.pressureChipText,
+                          isSelected
+                            ? styles.pressureChipTextActive
+                            : styles.pressureChipTextInactive,
+                        ]}
+                      >
+                        {val}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.updatedByText}>
+                Last Station Pressure have been updated by{' '}
+                <Text style={styles.updatedByHighlight}>
+                  {selectedStation.cngPressureUpdatedBy || 'cngnav'}
+                </Text>
+              </Text>
+            </View>
+
+            {/* Update Station Crowd Level Section */}
+            <View style={styles.updateCard}>
+              <View style={styles.updateCardHeader}>
+                <Text style={styles.updateCardTitle}>Update Station Crowd</Text>
+                <View style={styles.updateCardTimeContainer}>
+                  <Text style={styles.updateTimeLabel}>Last Updated At</Text>
+                  <Text style={styles.updateTimeValue}>
+                    {formatUpdatedTime(selectedStation.crowdUpdatedAt).timeStr}
+                  </Text>
+                  {formatUpdatedTime(selectedStation.crowdUpdatedAt).relativeStr ? (
+                    <Text style={styles.updateTimeRelative}>
+                      {formatUpdatedTime(selectedStation.crowdUpdatedAt).relativeStr}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+
+              {/* Crowd Buttons */}
+              <View style={styles.crowdButtonsRow}>
+                {[
+                  { level: 'low', label: 'Low', wait: '~5 min', color: '#10B981', icon: 'checkmark-circle' },
+                  { level: 'medium', label: 'Moderate', wait: '~15 min', color: '#F59E0B', icon: 'information-circle' },
+                  { level: 'high', label: 'Heavy', wait: '~30 min', color: '#EF4444', icon: 'alert-circle' },
+                ].map((item) => {
+                  const isSelected = (selectedStation.crowdLevel || 'low') === item.level;
+                  return (
+                    <TouchableOpacity
+                      key={item.level}
+                      style={[
+                        styles.crowdButton,
+                        isSelected
+                          ? { backgroundColor: item.color, borderColor: item.color }
+                          : { backgroundColor: '#FFFFFF', borderColor: '#E5E7EB' },
+                      ]}
+                      onPress={() => handleUpdateCrowd(item.level as any)}
+                      disabled={updatingField === 'crowd'}
+                    >
+                      <Ionicons
+                        name={item.icon as any}
+                        size={16}
+                        color={isSelected ? '#FFFFFF' : item.color}
+                      />
+                      <Text
+                        style={[
+                          styles.crowdButtonText,
+                          { color: isSelected ? '#FFFFFF' : colors.textPrimary },
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.crowdButtonWaitText,
+                          { color: isSelected ? 'rgba(255,255,255,0.9)' : colors.textSecondary },
+                        ]}
+                      >
+                        {item.wait}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.updatedByText}>
+                Last Station Crowd have been updated by{' '}
+                <Text style={styles.updatedByHighlight}>
+                  {selectedStation.crowdUpdatedBy || 'Amit'}
+                </Text>
+              </Text>
+            </View>
+
+            {/* NAVIGATE BUTTON */}
             <TouchableOpacity
-              style={styles.navigationButton}
+              style={styles.navigateActionButton}
               onPress={handleStartNavigation}
             >
-              <Ionicons name="navigate" size={20} color="#fff" />
-              <Text style={styles.navigationButtonText}>Start Navigation</Text>
+              <Ionicons name="navigate" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.navigateActionText}>NAVIGATE</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
-      )
-      }
+      )}
 
       {/* Loading Overlay */}
       {
@@ -1270,7 +1857,45 @@ const styles = StyleSheet.create({
     height: 46,
     borderRadius: 23,
   },
-  // ...
+  suggestionsDropdown: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  suggestionIconContainer: {
+    marginRight: 12,
+    width: 24,
+    alignItems: 'center',
+  },
+  suggestionTextContainer: {
+    flex: 1,
+  },
+  suggestionMainText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  suggestionSecondaryText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   mapLayerButton: {
     position: 'absolute',
     right: spacing.md,
@@ -1387,12 +2012,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.lg,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 10,
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 12,
+    maxHeight: '75%',
+  },
+  sheetScrollView: {
+    maxHeight: 520,
   },
   sheetHandle: {
     width: 40,
@@ -1401,7 +2030,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     alignSelf: 'center',
     marginTop: spacing.sm,
-    marginBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
   closeButton: {
     position: 'absolute',
@@ -1410,12 +2039,15 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   sheetContent: {
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
   },
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: 4,
+    paddingRight: 30,
   },
   stationName: {
     fontSize: 20,
@@ -1428,65 +2060,208 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: 4,
+    marginLeft: spacing.sm,
   },
   partnerBadgeText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
   },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: spacing.sm,
-  },
-  detailText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginLeft: spacing.sm,
-    flex: 1,
-  },
-  cngStatusBadge: {
-    marginLeft: spacing.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  cngStatusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  fuelTypes: {
+  ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.sm,
-    marginBottom: spacing.lg,
+    marginBottom: 6,
   },
-  fuelTypeLabel: {
-    fontSize: 14,
+  ratingText: {
+    fontSize: 13,
     fontWeight: '600',
+    color: colors.textSecondary,
+    marginLeft: 6,
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  addressText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginLeft: 6,
+    flex: 1,
+    lineHeight: 18,
+  },
+  summaryTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  summaryTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  summaryTagText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  summaryTagTextSecondary: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  updateCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  updateCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  updateCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
     color: colors.textPrimary,
-    marginRight: spacing.sm,
+    flex: 1,
   },
-  fuelTypeText: {
-    fontSize: 14,
-    color: colors.primary,
+  updateCardTimeContainer: {
+    alignItems: 'flex-end',
+  },
+  updateTimeLabel: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  updateTimeValue: {
+    fontSize: 11,
+    color: colors.textPrimary,
     fontWeight: '600',
+    marginTop: 1,
   },
-  navigationButton: {
+  updateTimeRelative: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+  },
+  statusButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  statusButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: 8,
-    marginTop: spacing.sm,
+    paddingVertical: 10,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    gap: 6,
   },
-  navigationButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: spacing.sm,
+  statusButtonActive: {
+    backgroundColor: '#70B85E',
+    borderColor: '#70B85E',
+  },
+  statusButtonInactive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#70B85E',
+  },
+  statusButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  statusButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  statusButtonTextInactive: {
+    color: '#70B85E',
+  },
+  pressureChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  pressureChip: {
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    minWidth: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pressureChipActive: {
+    backgroundColor: '#70B85E',
+    borderColor: '#70B85E',
+  },
+  pressureChipInactive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#70B85E',
+  },
+  pressureChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pressureChipTextActive: {
+    color: '#FFFFFF',
+  },
+  pressureChipTextInactive: {
+    color: '#70B85E',
+  },
+  crowdButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  crowdButton: {
+    flex: 1,
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  crowdButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  crowdButtonWaitText: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  updatedByText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  updatedByHighlight: {
+    color: '#2B80B9',
+    fontWeight: '700',
+  },
+  navigateActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#70B85E',
+    paddingVertical: 12,
+    borderRadius: 6,
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  navigateActionText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFill,

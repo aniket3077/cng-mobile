@@ -19,9 +19,19 @@ export interface Station {
   fuelTypes: string[];
   isPartner: boolean;
   rating: number;
+  totalReviews?: number;
+  cngAvailable?: boolean;
+  cngQuantityKg?: number | null;
+  cngStatusUpdatedAt?: string | null;
+  cngStatusUpdatedBy?: string | null;
+  cngPressure?: string | null;
+  cngPressureUpdatedAt?: string | null;
+  cngPressureUpdatedBy?: string | null;
   crowdLevel?: 'low' | 'medium' | 'high';
   crowdCount?: number;
   estimatedWaitTime?: number;
+  crowdUpdatedAt?: string | null;
+  crowdUpdatedBy?: string | null;
 }
 
 export interface StationSuggestion {

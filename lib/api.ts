@@ -250,6 +250,54 @@ export const stationsApi = {
       throw error;
     }
   },
+
+  updateStatus: async (
+    id: string,
+    data: {
+      cngAvailable: boolean;
+      stationName?: string;
+      address?: string;
+      city?: string;
+      state?: string;
+      lat?: number;
+      lng?: number;
+    }
+  ) => {
+    const response = await api.post(`/stations/${id}/status`, data);
+    return response.data;
+  },
+
+  updatePressure: async (
+    id: string,
+    data: {
+      cngPressure: string;
+      stationName?: string;
+      address?: string;
+      city?: string;
+      state?: string;
+      lat?: number;
+      lng?: number;
+    }
+  ) => {
+    const response = await api.post(`/stations/${id}/pressure`, data);
+    return response.data;
+  },
+
+  updateCrowd: async (
+    id: string,
+    data: {
+      crowdLevel: 'low' | 'medium' | 'high';
+      stationName?: string;
+      address?: string;
+      city?: string;
+      state?: string;
+      lat?: number;
+      lng?: number;
+    }
+  ) => {
+    const response = await api.post(`/stations/${id}/crowd`, data);
+    return response.data;
+  },
 };
 
 export const nearbyStationsApi = {

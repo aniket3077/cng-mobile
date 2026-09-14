@@ -16,6 +16,7 @@ import { featureFlags } from '../lib/featureFlags';
 import { nearbyStationsApi, stationsApi, voiceQueryApi } from '../lib/api';
 import { AppScreenProps } from '../types/navigation';
 import { sanitizeVoiceQuery } from '../lib/security';
+import { isLikelyCngStation } from '../utils/cngDetector';
 
 type Props = AppScreenProps<'VoiceSearch'>;
 
@@ -211,19 +212,21 @@ export default function VoiceSearchScreen({ navigation }: Props) {
       }
 
       const stations = Array.isArray(googleResponse?.stations)
-        ? googleResponse.stations.map((s: any) => ({
-            id: s.placeId || `${s.coordinates?.lat}-${s.coordinates?.lng}`,
-            name: s.name || 'CNG Station',
-            address: s.address || '',
-            city: '',
-            state: '',
-            lat: s.coordinates?.lat,
-            lng: s.coordinates?.lng,
-            fuelTypes: 'CNG',
-            isPartner: false,
-            cngAvailable: s.openNow ?? undefined,
-            cngQuantityKg: null,
-          }))
+        ? googleResponse.stations
+            .filter((s: any) => isLikelyCngStation(s.name, s.address))
+            .map((s: any) => ({
+              id: s.placeId || `${s.coordinates?.lat}-${s.coordinates?.lng}`,
+              name: s.name || 'CNG Station',
+              address: s.address || '',
+              city: '',
+              state: '',
+              lat: s.coordinates?.lat,
+              lng: s.coordinates?.lng,
+              fuelTypes: s.fuelTypes || 'CNG',
+              isPartner: false,
+              cngAvailable: s.openNow ?? undefined,
+              cngQuantityKg: null,
+            }))
         : [];
 
       if (!stations.length) {
