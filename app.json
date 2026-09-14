@@ -2,7 +2,7 @@
   "expo": {
     "name": "CNG Bharat",
     "slug": "cngbharat-mobile",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "scheme": "cngbharat",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
@@ -31,7 +31,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.aniket3077.cngbharatmobile",
-      "versionCode": 12,
+      "versionCode": 13,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
